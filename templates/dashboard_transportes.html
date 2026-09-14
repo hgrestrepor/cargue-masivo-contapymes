@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Cargar Excel Transportes{% endblock %}
+{% block content %}
+<div class="row justify-content-center mt-5">
+    <div class="col-md-6">
+        <div class="card shadow">
+            <div class="card-header bg-success text-white text-center">
+                <h4 class="mb-0">Carga Archivo Excel TRANSPORTES</h4>
+            </div>
+            <div class="card-body p-4 text-center">
+                <p class="text-muted">
+                    Este proceso genera los JSON usando la configuración de
+                    <strong>Config Transportes</strong>.
+                </p>
+                <form method="POST" action="{{ url_for('upload_transportes') }}" enctype="multipart/form-data">
+                    <div class="mb-3">
+                        <input type="file" name="excel_file" class="form-control" accept=".xlsx,.xls" required>
+                    </div>
+                    <button type="submit" class="btn btn-success btn-lg">
+                        Cargar Excel
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Cargue Ceder
+Comment=Ejecutar servidor CargueCeder
+Exec=bash -c 'cd "$HOME/Escritorio/cargueCeder" && bash iniciar.sh'
+Icon=utilities-terminal
+Terminal=true
+Type=Application
+Categories=Utility;

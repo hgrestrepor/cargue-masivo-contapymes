@@ -1,0 +1,9 @@
+__pycache__/
+*.py[cod]
+*.db
+jsons/
+uploads/
+.venv/
+venv/
+*.xlsx.bak
+.DS_Store

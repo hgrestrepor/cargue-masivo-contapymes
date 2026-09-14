@@ -1,0 +1,127 @@
+*, *::before, *::after {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+html, body {
+    height: 100%;
+    background-color: #ffffff;
+}
+
+body {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+}
+
+/* Login page layout */
+.login-wrapper {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    flex: 1;
+    padding: 2rem 1rem;
+    background-color: #ffffff;
+}
+
+.logo-login {
+    max-width: 220px;
+    height: auto;
+    margin-bottom: 2rem;
+    display: block;
+}
+
+/* Login card */
+.login-card {
+    width: 100%;
+    max-width: 400px;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    background-color: #ffffff;
+}
+
+.login-card .card-body {
+    padding: 2rem;
+}
+
+.login-card h3 {
+    font-size: 1.3rem;
+    font-weight: 600;
+    color: #333;
+    margin-bottom: 1.5rem;
+}
+
+.login-card .form-control {
+    border-radius: 6px;
+    padding: 0.6rem 0.8rem;
+    border: 1px solid #ccc;
+}
+
+.login-card .form-control:focus {
+    border-color: #0d6efd;
+    box-shadow: 0 0 0 0.2rem rgba(13, 110, 253, 0.15);
+}
+
+.login-card .btn-primary {
+    padding: 0.6rem;
+    font-weight: 500;
+    border-radius: 6px;
+}
+
+/* Navbar (authenticated pages) */
+.navbar-brand {
+    font-weight: bold;
+}
+
+.logo-nav {
+    height: 40px;
+    width: auto;
+}
+
+/* Content area */
+.content-area {
+    flex: 1;
+    background-color: #ffffff;
+}
+
+/* Footer */
+.footer {
+    background-color: #ffffff;
+    text-align: center;
+    padding: 0;
+    margin: 0;
+    width: 100%;
+    border-top: 1px solid #eee;
+}
+
+.footer-img {
+    display: block;
+    width: 100%;
+    max-height: 80px;
+    object-fit: contain;
+    margin: 0 auto;
+}
+
+/* Dashboard / Admin cards */
+.btn-success {
+    font-size: 1.1rem;
+    padding: 10px 36px;
+}
+
+/* Responsive */
+@media (max-width: 576px) {
+    .logo-login {
+        max-width: 160px;
+    }
+
+    .login-card {
+        max-width: 100%;
+    }
+
+    .login-card .card-body {
+        padding: 1.5rem;
+    }
+}
