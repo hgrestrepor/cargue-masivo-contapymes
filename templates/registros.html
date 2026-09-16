@@ -11,6 +11,7 @@
                     <thead class="table-dark">
                         <tr>
                             <th>#</th>
+                            <th>Usuario</th>
                             <th>Tipo</th>
                             <th>Archivo</th>
                             <th>Fecha</th>
@@ -23,6 +24,7 @@
                         {% for log in logs %}
                         <tr>
                             <td>{{ log.id }}</td>
+                            <td>{{ log.usuario or '-' }}</td>
                             <td>
                                 {% if log.tipo == 'Madres' %}
                                 <span class="badge bg-primary">Madres</span>

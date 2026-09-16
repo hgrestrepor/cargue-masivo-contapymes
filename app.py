@@ -2,6 +2,7 @@ import hashlib
 import json
 import os
 from functools import wraps
+from requests.exceptions import ConnectionError, Timeout
 from flask import (
     Flask,
     render_template,
@@ -10,6 +11,8 @@ from flask import (
     url_for,
     session,
     flash,
+    jsonify,
+    get_flashed_messages,
 )
 from database import (
     init_db, verify_user, create_user, get_all_users, delete_user,
@@ -42,6 +45,23 @@ def admin_required(f):
             return redirect(url_for("dashboard"))
         return f(*args, **kwargs)
     return decorated
+
+
+def responder(redirect_url, ok=True):
+    """Devuelve JSON si la peticion es AJAX (fetch), de lo contrario redirige."""
+    if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+        return jsonify({"ok": ok, "flash": get_flashed_messages(with_categories=True)})
+    return redirect(redirect_url)
+
+
+MENSAJE_CONEXION = "Error al conectar con los servicios de Contapyme"
+
+
+def mensaje_error(exc):
+    """Mapea errores de conexión de la API a un mensaje genérico."""
+    if isinstance(exc, (ConnectionError, Timeout)):
+        return MENSAJE_CONEXION
+    return str(exc)
 
 
 @app.route("/")
@@ -84,18 +104,18 @@ def dashboard_transportes():
 def upload():
     if "excel_file" not in request.files:
         flash("No se seleccionó ningún archivo", "danger")
-        return redirect(url_for("dashboard"))
+        return responder(url_for("dashboard"), ok=False)
 
     file = request.files["excel_file"]
     if file.filename == "":
         flash("No se seleccionó ningún archivo", "danger")
-        return redirect(url_for("dashboard"))
+        return responder(url_for("dashboard"), ok=False)
 
     allowed = (".xlsx", ".xls")
     if not file.filename.lower().endswith(allowed):
         flash("Solo se permiten archivos Excel (.xlsx, .xls)", "danger")
-        log_upload(file.filename, False, 0, tipo="Madres")
-        return redirect(url_for("dashboard"))
+        log_upload(file.filename, False, 0, tipo="Madres", usuario=session.get("username", ""))
+        return responder(url_for("dashboard"), ok=False)
 
     filepath = os.path.join(UPLOAD_FOLDER, file.filename)
     file.save(filepath)
@@ -118,24 +138,24 @@ def upload():
             df, file.filename, json_padre, json_hijo, mapeo
         )
         if error:
-            log_upload(file.filename, False, num_registros, tipo="Madres")
+            log_upload(file.filename, False, num_registros, tipo="Madres", usuario=session.get("username", ""))
             flash(f"No se pudo generar el JSON: {error}", "danger")
-            return redirect(url_for("dashboard"))
+            return responder(url_for("dashboard"), ok=False)
 
-        log_upload(file.filename, True, num_registros, tipo="Madres")
+        log_upload(file.filename, True, num_registros, tipo="Madres", usuario=session.get("username", ""))
 
         if not cfg.get("ep_email") or not cfg.get("ep_password"):
             flash(
                 "JSONs generados pero no se enviaron: configura el Email y la contraseña del endpoint.",
                 "warning",
             )
-            return redirect(url_for("dashboard"))
+            return responder(url_for("dashboard"))
 
         try:
             auth_resp = get_auth(cfg)
         except Exception as exc:
-            flash(f"Error al autenticar (GetAuth): {str(exc)}", "danger")
-            return redirect(url_for("dashboard"))
+            flash(f"Error al autenticar (GetAuth): {mensaje_error(exc)}", "danger")
+            return responder(url_for("dashboard"), ok=False)
 
         encabezado_auth = extraer_encabezado(auth_resp)
         if encabezado_auth.get("resultado") != "true":
@@ -144,12 +164,12 @@ def upload():
                 f"[imensaje {encabezado_auth.get('imensaje', '')}]",
                 "danger",
             )
-            return redirect(url_for("dashboard"))
+            return responder(url_for("dashboard"), ok=False)
 
         keyagente = extraer_keyagente(auth_resp)
         if not keyagente:
             flash("No se obtuvo el keyagente de la autenticación.", "danger")
-            return redirect(url_for("dashboard"))
+            return responder(url_for("dashboard"), ok=False)
 
         save_config_json(
             json_padre, json_hijo, cfg["mapeo"],
@@ -165,7 +185,6 @@ def upload():
 
         exitosos = 0
         fallidos = []
-        resultados = []
         for ruta in archivos_generados:
             try:
                 with open(ruta, "r", encoding="utf-8") as f:
@@ -176,37 +195,40 @@ def upload():
                 if ok:
                     exitosos += 1
                 else:
-                    fallidos.append(ruta)
-                resultados.append({
-                    "archivo": ruta,
-                    "ok": ok,
-                    "mensaje": enc.get("mensaje", ""),
-                    "imensaje": enc.get("imensaje", ""),
-                    "detalle": detalle_respuesta(opr_resp),
-                })
+                    fallidos.append({
+                        "archivo": ruta,
+                        "mensaje": enc.get("mensaje", "Sin mensaje"),
+                        "imensaje": enc.get("imensaje", ""),
+                        "detalle": detalle_respuesta(opr_resp),
+                    })
             except Exception as exc:
-                fallidos.append(ruta)
-                resultados.append({
+                fallidos.append({
                     "archivo": ruta,
-                    "ok": False,
-                    "mensaje": str(exc),
+                    "mensaje": mensaje_error(exc),
                     "imensaje": "",
+                    "detalle": None,
                 })
 
-        flash(
-            f"Archivo '{file.filename}' procesado. Registros: {num_registros}. "
-            f"JSON generados: {creados}. Enviados: {exitosos}. Fallidos: {len(fallidos)}.",
-            "success" if not fallidos else "warning",
-        )
-        for res in resultados:
-            estado = "EXITOSO" if res["ok"] else "FALLIDO"
-            mensaje = res.get("detalle") or res.get("mensaje") or "Sin detalle"
-            flash(f"[{estado}] {res['archivo']}: {mensaje}", "success" if res["ok"] else "danger")
+        if not fallidos:
+            palabra = "documento soporte creado con éxito" if exitosos == 1 else "documentos soporte creados con éxito"
+            flash(f"{exitosos} {palabra}", "success")
+        else:
+            flash(
+                f"Archivo '{file.filename}' procesado. Registros: {num_registros}. "
+                f"JSON generados: {creados}. Enviados: {exitosos}. Fallidos: {len(fallidos)}.",
+                "warning",
+            )
+            for fallo in fallidos:
+                mensaje = fallo.get("detalle") or fallo.get("mensaje") or "Sin detalle"
+                endpoint_msg = fallo.get("mensaje") or ""
+                flash(f"[FALLIDO] {fallo['archivo']}: {mensaje}", "danger")
+                if endpoint_msg and (not fallo.get("detalle") or endpoint_msg != fallo.get("detalle")):
+                    flash(f"Respuesta del endpoint: {endpoint_msg}", "danger")
     except Exception as e:
-        log_upload(file.filename, False, 0, tipo="Madres")
-        flash(f"Error al procesar el archivo: {str(e)}", "danger")
+        log_upload(file.filename, False, 0, tipo="Madres", usuario=session.get("username", ""))
+        flash(f"Error al procesar el archivo: {mensaje_error(e)}", "danger")
 
-    return redirect(url_for("dashboard"))
+    return responder(url_for("dashboard"))
 
 
 @app.route("/upload-transportes", methods=["POST"])
@@ -214,18 +236,18 @@ def upload():
 def upload_transportes():
     if "excel_file" not in request.files:
         flash("No se seleccionó ningún archivo", "danger")
-        return redirect(url_for("dashboard_transportes"))
+        return responder(url_for("dashboard_transportes"), ok=False)
 
     file = request.files["excel_file"]
     if file.filename == "":
         flash("No se seleccionó ningún archivo", "danger")
-        return redirect(url_for("dashboard_transportes"))
+        return responder(url_for("dashboard_transportes"), ok=False)
 
     allowed = (".xlsx", ".xls")
     if not file.filename.lower().endswith(allowed):
         flash("Solo se permiten archivos Excel (.xlsx, .xls)", "danger")
-        log_upload(file.filename, False, 0, tipo="Transportes")
-        return redirect(url_for("dashboard_transportes"))
+        log_upload(file.filename, False, 0, tipo="Transportes", usuario=session.get("username", ""))
+        return responder(url_for("dashboard_transportes"), ok=False)
 
     filepath = os.path.join(UPLOAD_FOLDER, file.filename)
     file.save(filepath)
@@ -238,17 +260,17 @@ def upload_transportes():
         cfg = get_config_json()
         json_transporte = cfg["json_transporte"]
         mapeo_transporte = cfg["mapeo_transporte"]
-        log_upload(file.filename, True, num_registros, tipo="Transportes")
+        log_upload(file.filename, True, num_registros, tipo="Transportes", usuario=session.get("username", ""))
         flash(
             f"Archivo '{file.filename}' recibido. Registros detectados: {num_registros}. "
             f"La generación de JSON de transportes se implementará próximamente.",
             "info",
         )
     except Exception as e:
-        log_upload(file.filename, False, 0, tipo="Transportes")
-        flash(f"Error al procesar el archivo: {str(e)}", "danger")
+        log_upload(file.filename, False, 0, tipo="Transportes", usuario=session.get("username", ""))
+        flash(f"Error al procesar el archivo: {mensaje_error(e)}", "danger")
 
-    return redirect(url_for("dashboard_transportes"))
+    return responder(url_for("dashboard_transportes"))
 
 
 @app.route("/admin", methods=["GET", "POST"])

@@ -108,17 +108,21 @@ def init_upload_logs():
         cursor.execute("ALTER TABLE upload_logs ADD COLUMN tipo TEXT DEFAULT ''")
     except sqlite3.OperationalError:
         pass
+    try:
+        cursor.execute("ALTER TABLE upload_logs ADD COLUMN usuario TEXT DEFAULT ''")
+    except sqlite3.OperationalError:
+        pass
     conn.commit()
     conn.close()
 
 
-def log_upload(nombre_archivo, exitoso, registros_procesados=0, tipo=""):
+def log_upload(nombre_archivo, exitoso, registros_procesados=0, tipo="", usuario=""):
     now = datetime.now()
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
-        "INSERT INTO upload_logs (fecha, hora, exitoso, registros_procesados, nombre_archivo, tipo) VALUES (?, ?, ?, ?, ?, ?)",
-        (now.strftime("%Y-%m-%d"), now.strftime("%H:%M:%S"), 1 if exitoso else 0, registros_procesados, nombre_archivo, tipo),
+        "INSERT INTO upload_logs (fecha, hora, exitoso, registros_procesados, nombre_archivo, tipo, usuario) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (now.strftime("%Y-%m-%d"), now.strftime("%H:%M:%S"), 1 if exitoso else 0, registros_procesados, nombre_archivo, tipo, usuario),
     )
     cursor.execute("SELECT COUNT(*) as total FROM upload_logs")
     total = cursor.fetchone()["total"]

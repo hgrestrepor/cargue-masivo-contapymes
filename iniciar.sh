@@ -1,4 +1,5 @@
 #!/bin/bash
+cd "$(dirname "$0")"
 echo "============================================"
 echo "  CARGUE CEDER - Inicio automatico"
 echo "============================================"
@@ -12,6 +13,18 @@ fi
 
 echo "[OK] Python detectado: $(python3 --version)"
 echo
+
+# Detener cualquier instancia anterior del servidor en el puerto 5000
+OLD_PID=$(ss -tlnp 2>/dev/null | grep ':5000' | grep -oP 'pid=\K[0-9]+' | head -1)
+if [ -n "$OLD_PID" ]; then
+    echo "[INFO] Deteniendo instancia anterior del servidor (PID $OLD_PID)..."
+    kill -9 "$OLD_PID" 2>/dev/null
+    sleep 1
+fi
+
+# Fallback: matar procesos python3 de app.py que sigan vivos
+pkill -9 -f "/home/harold/Escritorio/cargueCeder/app.py" 2>/dev/null
+sleep 1
 
 echo "[INFO] Instalando dependencias..."
 pip3 install flask bcrypt pandas openpyxl requests --quiet
