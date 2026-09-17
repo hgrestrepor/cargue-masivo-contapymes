@@ -172,6 +172,32 @@
                     <!-- Mapeo JSON Transporte -->
                     <div class="tab-pane fade show active" id="transporte-json" role="tabpanel">
                         <div class="card shadow mb-3">
+                            <div class="card-header bg-success text-white">Columnas de recorrido Transporte</div>
+                            <div class="card-body">
+                                <p class="text-muted small">
+                                    El Excel de transportes se recorre agrupando por una columna (por defecto el
+                                    <strong>acudiente</strong>). Los datos de la columna del profesional se comparten
+                                    entre todos los acudientes de ese grupo (se heredan hacia abajo si vienen vacíos).
+                                </p>
+                                <div class="row g-3">
+                                    <div class="col-md-6">
+                                        <label class="form-label fw-bold">Columna por la que se recorre el Excel</label>
+                                        <input type="text" name="columna_recorrido_transporte" class="form-control"
+                                               value="{{ columna_recorrido_transporte }}"
+                                               placeholder="ej. NOMBRE DEL ACUDIENTE">
+                                        <div class="form-text">Se genera 1 JSON por cada valor único de esta columna.</div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label fw-bold">Columna del profesional (compartida)</label>
+                                        <input type="text" name="columna_profesional_transporte" class="form-control"
+                                               value="{{ columna_profesional_transporte }}"
+                                               placeholder="ej. PROFESIONAL">
+                                        <div class="form-text">Sus valores se replican/heredan entre los acudientes del mismo profesional.</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="card shadow mb-3">
                             <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center">
                                 Plantilla JSON Transporte
                                 <div class="form-check form-switch text-white">
@@ -181,9 +207,22 @@
                             </div>
                             <div class="card-body" id="jsonTransporteBodyContent">
                                 <p class="text-muted small">
-                                    Estructura única del JSON de la configuración Transporte, enviada tal cual al endpoint.
+                                    Estructura completa del JSON de la configuración Transporte, enviada tal cual al endpoint.
+                                    Se sugiere dejar los valores por defecto (vacíos): el mapeo Excel &rarr; JSON los llena
+                                    automáticamente. El array <code>ingresosegresos</code> se reemplaza con los índices
+                                    generados desde el Excel.
                                 </p>
                                 <textarea name="json_transporte" class="form-control font-monospace" rows="24" style="min-height: 360px;">{{ json_transporte }}</textarea>
+                            </div>
+                        </div>
+                        <div class="card shadow mb-3">
+                            <div class="card-header bg-success text-white">Índice Hijo del JSON Transporte</div>
+                            <div class="card-body">
+                                <p class="text-muted small">
+                                    Plantilla de cada elemento de <code>ingresosegresos</code> que se crea por fila/acudiente
+                                    del Excel. Si se deja vacía, se toma el primer elemento del JSON Transporte.
+                                </p>
+                                <textarea name="json_transporte_hijo" class="form-control font-monospace" rows="18" style="min-height: 260px;">{{ json_transporte_hijo }}</textarea>
                             </div>
                         </div>
                     </div>
@@ -194,6 +233,11 @@
                             <div class="card-body">
                                 <p class="text-muted small">
                                     Aquí se define qué columna del Excel llena cada campo del JSON de la configuración Transporte.
+                                    Usa rutas como:
+                                    <code>ingresosegresos.icuenta</code>, <code>ingresosegresos.mvalor</code>,
+                                    <code>ingresosegresos.tdetalle</code>, <code>ingresosegresos.icc</code>,
+                                    <code>datosprincipales.init</code> (documento del acudiente), 
+                                    <code>encabezado.tdetalle</code> (concepto general del profesional), etc.
                                 </p>
                                 <table class="table table-sm">
                                     <thead>

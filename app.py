@@ -18,6 +18,10 @@ from database import (
     init_db, verify_user, create_user, get_all_users, delete_user,
     log_upload, get_upload_logs, get_config_json, save_config_json,
 )
+from procesador_excel import (
+    generar_jsons, generar_jsons_transporte,
+    DEFAULT_COLUMNA_RECORRIDO_TRANSPORTE, DEFAULT_COLUMNA_PROFESIONAL_TRANSPORTE,
+)
 
 app = Flask(__name__)
 app.secret_key = "cargue-ceder-secret-key-2026"
@@ -259,13 +263,114 @@ def upload_transportes():
         num_registros = len(df)
         cfg = get_config_json()
         json_transporte = cfg["json_transporte"]
+        json_transporte_hijo = cfg["json_transporte_hijo"]
         mapeo_transporte = cfg["mapeo_transporte"]
-        log_upload(file.filename, True, num_registros, tipo="Transportes", usuario=session.get("username", ""))
-        flash(
-            f"Archivo '{file.filename}' recibido. Registros detectados: {num_registros}. "
-            f"La generación de JSON de transportes se implementará próximamente.",
-            "info",
+        columna_recorrido = cfg.get("columna_recorrido_transporte") or DEFAULT_COLUMNA_RECORRIDO_TRANSPORTE
+        columna_profesional = cfg.get("columna_profesional_transporte") or DEFAULT_COLUMNA_PROFESIONAL_TRANSPORTE
+
+        creados, registros_json, error, archivos_generados = generar_jsons_transporte(
+            df, file.filename,
+            template_transporte=json_transporte,
+            template_hijo=json_transporte_hijo,
+            mapping=mapeo_transporte,
+            columna_recorrido=columna_recorrido,
+            columna_profesional=columna_profesional,
         )
+        if error:
+            log_upload(file.filename, False, num_registros, tipo="Transportes", usuario=session.get("username", ""))
+            flash(f"No se pudo generar el JSON de transportes: {error}", "danger")
+            return responder(url_for("dashboard_transportes"), ok=False)
+
+        log_upload(file.filename, True, num_registros, tipo="Transportes", usuario=session.get("username", ""))
+
+        if not cfg.get("ep_email") or not cfg.get("ep_password"):
+            flash(
+                "JSONs generados pero no se enviaron: configura el Email y la contraseña del endpoint.",
+                "warning",
+            )
+            return responder(url_for("dashboard_transportes"))
+
+        from servicio_api import (
+            get_auth, extraer_keyagente, get_base_url, enviar_operacion,
+            extraer_encabezado, detalle_respuesta,
+        )
+
+        try:
+            auth_resp = get_auth(cfg)
+        except Exception as exc:
+            flash(f"Error al autenticar (GetAuth): {mensaje_error(exc)}", "danger")
+            return responder(url_for("dashboard_transportes"), ok=False)
+
+        encabezado_auth = extraer_encabezado(auth_resp)
+        if encabezado_auth.get("resultado") != "true":
+            flash(
+                f"Autenticación fallida (GetAuth): {encabezado_auth.get('mensaje', 'Sin detalle')} "
+                f"[imensaje {encabezado_auth.get('imensaje', '')}]",
+                "danger",
+            )
+            return responder(url_for("dashboard_transportes"), ok=False)
+
+        keyagente = extraer_keyagente(auth_resp)
+        if not keyagente:
+            flash("No se obtuvo el keyagente de la autenticación.", "danger")
+            return responder(url_for("dashboard_transportes"), ok=False)
+
+        save_config_json(
+            cfg["json_padre"], cfg["json_hijo"], cfg["mapeo"],
+            endpoint={
+                "ep_ip": cfg["ep_ip"], "ep_puerto": cfg["ep_puerto"],
+                "ep_email": cfg["ep_email"], "ep_password": cfg["ep_password"],
+                "ep_iapp": cfg["ep_iapp"], "ep_idmaquina": cfg["ep_idmaquina"],
+                "ep_keyagente": keyagente,
+            },
+            contenido_transporte=json_transporte,
+            contenido_transporte_hijo=json_transporte_hijo,
+            mapeo_transporte=mapeo_transporte,
+            columna_recorrido_transporte=columna_recorrido,
+            columna_profesional_transporte=columna_profesional,
+        )
+
+        exitosos = 0
+        fallidos = []
+        for ruta in archivos_generados:
+            try:
+                with open(ruta, "r", encoding="utf-8") as f:
+                    oprdata = json.load(f)
+                opr_resp = enviar_operacion(cfg, keyagente, oprdata)
+                enc = extraer_encabezado(opr_resp)
+                ok = enc.get("resultado", "false") == "true"
+                if ok:
+                    exitosos += 1
+                else:
+                    fallidos.append({
+                        "archivo": ruta,
+                        "mensaje": enc.get("mensaje", "Sin mensaje"),
+                        "imensaje": enc.get("imensaje", ""),
+                        "detalle": detalle_respuesta(opr_resp),
+                    })
+            except Exception as exc:
+                fallidos.append({
+                    "archivo": ruta,
+                    "mensaje": mensaje_error(exc),
+                    "imensaje": "",
+                    "detalle": None,
+                })
+
+        if not fallidos:
+            palabra = "documento soporte creado con éxito" if exitosos == 1 else "documentos soporte creados con éxito"
+            flash(f"{exitosos} {palabra}", "success")
+        else:
+            flash(
+                f"Archivo '{file.filename}' procesado. Registros: {num_registros}. "
+                f"JSON generados: {creados}. Enviados: {exitosos}. Fallidos: {len(fallidos)}.",
+                "warning",
+            )
+            for fallo in fallidos:
+                mensaje = fallo.get("detalle") or fallo.get("mensaje") or "Sin detalle"
+                endpoint_msg = fallo.get("mensaje") or ""
+                flash(f"[FALLIDO] {fallo['archivo']}: {mensaje}", "danger")
+                if endpoint_msg and (not fallo.get("detalle") or endpoint_msg != fallo.get("detalle")):
+                    flash(f"Respuesta del endpoint: {endpoint_msg}", "danger")
     except Exception as e:
         log_upload(file.filename, False, 0, tipo="Transportes", usuario=session.get("username", ""))
         flash(f"Error al procesar el archivo: {mensaje_error(e)}", "danger")
@@ -319,8 +424,14 @@ def config_json():
         campos_excel = request.form.getlist("campo_excel")
 
         json_transporte = request.form.get("json_transporte", "{}")
+        json_transporte_hijo = request.form.get("json_transporte_hijo", "{}")
         campos_json_transporte = request.form.getlist("campo_json_transporte")
         campos_excel_transporte = request.form.getlist("campo_excel_transporte")
+
+        columna_recorrido_transporte = (request.form.get("columna_recorrido_transporte", "")
+                                        or DEFAULT_COLUMNA_RECORRIDO_TRANSPORTE)
+        columna_profesional_transporte = (request.form.get("columna_profesional_transporte", "")
+                                          or DEFAULT_COLUMNA_PROFESIONAL_TRANSPORTE)
 
         ep_email = request.form.get("ep_email", "")
         ep_password = request.form.get("ep_password", "")
@@ -369,11 +480,19 @@ def config_json():
         except json.JSONDecodeError:
             transporte_valido = False
             flash("El JSON Transporte no es válido. Verifica la sintaxis.", "danger")
+        try:
+            json.loads(json_transporte_hijo)
+        except json.JSONDecodeError:
+            transporte_valido = False
+            flash("El Índice Hijo Transporte no es válido. Verifica la sintaxis.", "danger")
 
         if padre_valido and hijo_valido and transporte_valido:
             save_config_json(json_padre, json_hijo, mapeo_json, endpoint,
                              contenido_transporte=json_transporte,
-                             mapeo_transporte=mapeo_transporte_json)
+                             contenido_transporte_hijo=json_transporte_hijo,
+                             mapeo_transporte=mapeo_transporte_json,
+                             columna_recorrido_transporte=columna_recorrido_transporte,
+                             columna_profesional_transporte=columna_profesional_transporte)
             flash("Configuración guardada exitosamente", "success")
 
     cfg = get_config_json()
@@ -397,7 +516,10 @@ def config_json():
         json_hijo=cfg["json_hijo"],
         mapeo=mapeo_list,
         json_transporte=cfg["json_transporte"],
+        json_transporte_hijo=cfg["json_transporte_hijo"],
         mapeo_transporte=mapeo_transporte_list,
+        columna_recorrido_transporte=cfg.get("columna_recorrido_transporte", DEFAULT_COLUMNA_RECORRIDO_TRANSPORTE),
+        columna_profesional_transporte=cfg.get("columna_profesional_transporte", DEFAULT_COLUMNA_PROFESIONAL_TRANSPORTE),
         ep_ip=cfg["ep_ip"],
         ep_puerto=cfg["ep_puerto"],
         ep_email=cfg["ep_email"],

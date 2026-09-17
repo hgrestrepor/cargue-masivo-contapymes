@@ -10,6 +10,7 @@ JSONS_DIR = os.path.join(os.path.dirname(__file__), "jsons")
 
 DEFAULT_MAPPING = [
     {"json": "icc", "excel": "centro de costos"},
+    {"json": "icuenta", "excel": "Cta contable"},
     {"json": "mvalor", "excel": "valor"},
     {"json": "tdetalle", "excel": "observacion"},
 ]
@@ -159,6 +160,108 @@ DEFAULT_JSON_HIJO = [
         "clase2": "",
     },
 ]
+
+DEFAULT_JSON_TRANSPORTE = {
+    "encabezado": {
+        "iemp": 1,
+        "inumoper": 3411,
+        "tdetalle": "",
+        "itdsop": 116,
+        "itdoper": "COM5",
+        "inumsop": 0,
+        "snumsop": "<AUTO>",
+        "fsoport": "",
+        "iclasifop": 0,
+        "iccbase": "",
+        "imoneda": "170",
+        "iprocess": 0,
+        "banulada": "F",
+        "blocal": "T",
+        "bniif": "T",
+        "svaloradic1": "",
+        "svaloradic2": "",
+        "svaloradic3": "",
+        "svaloradic4": "",
+        "svaloradic5": "",
+        "svaloradic6": "",
+        "svaloradic7": "",
+        "svaloradic8": "",
+        "svaloradic9": "",
+        "svaloradic10": "",
+        "svaloradic11": "",
+        "svaloradic12": "",
+        "fecha1adic": "12/30/1899",
+        "fecha2adic": "12/30/1899",
+        "fecha3adic": "12/30/1899",
+        "datosaddin": "",
+        "fcreacion": "",
+        "fultima": "",
+        "fprocesam": "12/30/1899",
+        "iusuario": "",
+        "iusuarioult": "",
+        "isucursal": "",
+        "inumoperultimp": "",
+        "inumoperpadre": 0,
+        "bespadre": False,
+        "bconfirmaenviofe": False,
+        "accionesalgrabar": "",
+        "mtotaloperacion": 0.0,
+    },
+    "datosprincipales": {
+        "init": "",
+        "ireferencia": "",
+        "bshowsupportinfo": "F",
+        "qregconcdescuento": 0,
+    },
+    "ingresosegresos": [],
+    "liquidimpuestos": [],
+    "formapago": {
+        "mtotalreg": "0.00000000",
+        "mtotalpago": "0.00000000",
+        "qpagoscaja": 0,
+        "qpagosbanco": 0,
+        "qpagoscxp": 0,
+        "qpagosamortcxc": 0,
+        "fpagocaja": [],
+        "fpagobanco": [],
+        "fpagocxp": [],
+        "fpagoamortcxc": [],
+    },
+}
+
+DEFAULT_JSON_TRANSPORTE_HIJO = {
+    "icc": "",
+    "icuenta": "",
+    "iactivo": "",
+    "mvalor": 0.0,
+    "tdetalle": "",
+    "itdsop": 116,
+    "inumsop": "<AUTO>",
+    "fsoport": "",
+    "init": "",
+    "mvrbase": 0.0,
+    "binteres": "F",
+    "binteresmora": "F",
+    "bperdonarmora": "F",
+    "binteresxcobrar": "F",
+    "valor1": 0.0,
+    "valor2": 0.0,
+    "clase1": "",
+    "clase2": "",
+}
+
+DEFAULT_MAPPING_TRANSPORTE = [
+    {"json": "encabezado.tdetalle", "excel": "concepto general"},
+    {"json": "datosprincipales.init", "excel": "numero de documento del acudiente"},
+    {"json": "ingresosegresos.icc", "excel": "centro de costo"},
+    {"json": "ingresosegresos.icuenta", "excel": "cuenta contable"},
+    {"json": "ingresosegresos.mvalor", "excel": "valor"},
+    {"json": "ingresosegresos.tdetalle", "excel": "concepto del detalle"},
+    {"json": "ingresosegresos.init", "excel": "numero de documento del acudiente"},
+]
+
+DEFAULT_COLUMNA_RECORRIDO_TRANSPORTE = "NOMBRE DEL ACUDIENTE"
+DEFAULT_COLUMNA_PROFESIONAL_TRANSPORTE = "NOMBRE PROFESIONAL"
 
 TERCEROS_PATTERNS = {
     "tercero",
@@ -315,7 +418,16 @@ def _column_exists(df, excel_name):
     return None
 
 
-def _parse_mapping(mapping_raw):
+def _find_named_column(df, nombre):
+    if not nombre:
+        return None
+    target = str(nombre).strip()
+    return _column_exists(df, target)
+
+
+def _parse_mapping(mapping_raw, default=None):
+    if default is None:
+        default = DEFAULT_MAPPING
     if isinstance(mapping_raw, list):
         items = mapping_raw
     elif isinstance(mapping_raw, str):
@@ -334,7 +446,7 @@ def _parse_mapping(mapping_raw):
                 "excel": str(item["excel"]).strip(),
             })
     if not mapping:
-        return deepcopy(DEFAULT_MAPPING)
+        return deepcopy(default)
     return mapping
 
 
@@ -351,6 +463,12 @@ def generar_jsons(df, archivo_origen, template_padre=None, template_hijo=None,
         base_hijo = hijo
 
     mapping = _parse_mapping(mapping)
+
+    campos_mapeados = {item["json"] for item in mapping}
+    for item in DEFAULT_MAPPING:
+        if item["json"] not in campos_mapeados:
+            mapping.append(dict(item))
+            campos_mapeados.add(item["json"])
 
     origen_base = os.path.splitext(os.path.basename(archivo_origen))[0]
 
@@ -431,6 +549,157 @@ def generar_jsons(df, archivo_origen, template_padre=None, template_hijo=None,
             item["mvalor"] = round(total, 2)
 
         nombre = f"{origen_base}_{_sanitize_filename(tercero)}_{timestamp}.json"
+        ruta = os.path.join(carpeta_archivo, nombre)
+        with open(ruta, "w", encoding="utf-8") as f:
+            json.dump(documento, f, ensure_ascii=False, indent=2)
+        archivos_generados.append(ruta)
+        total_json += 1
+
+    return total_json, total_registros, None, archivos_generados
+
+
+def _parse_template_transporte(template_transporte, template_hijo):
+    """Devuelve (plantilla_padre, plantilla_hijo) para transportes."""
+    transporte = _parse_template(template_transporte, DEFAULT_JSON_TRANSPORTE)
+    if not isinstance(transporte, dict):
+        transporte = deepcopy(DEFAULT_JSON_TRANSPORTE)
+
+    hijo = _parse_template(template_hijo, DEFAULT_JSON_TRANSPORTE_HIJO)
+    if isinstance(hijo, list):
+        hijo = hijo[0] if hijo else deepcopy(DEFAULT_JSON_TRANSPORTE_HIJO)
+    if not isinstance(hijo, dict):
+        hijo = deepcopy(DEFAULT_JSON_TRANSPORTE_HIJO)
+
+    ingresos_plantilla = transporte.get("ingresosegresos", [])
+    if isinstance(ingresos_plantilla, list) and ingresos_plantilla and isinstance(ingresos_plantilla[0], dict):
+        hijo = deepcopy(ingresos_plantilla[0])
+
+    return transporte, hijo
+
+
+def _aplicar_mapeo_transporte(documento, ingreso, path, valor):
+    """Asigna valor según la ruta JSON del mapeo de transportes."""
+    if not path:
+        return
+    partes = [p for p in str(path).split(".") if p]
+    if not partes:
+        return
+    if partes[0] == "ingresosegresos":
+        if len(partes) > 1:
+            ingreso[partes[1]] = valor
+        return
+    cursor = documento
+    for parte in partes[:-1]:
+        siguiente = cursor.get(parte)
+        if not isinstance(siguiente, dict):
+            siguiente = {}
+            cursor[parte] = siguiente
+        cursor = siguiente
+    cursor[partes[-1]] = valor
+
+
+def generar_jsons_transporte(df, archivo_origen, template_transporte=None,
+                             template_hijo=None, mapping=None,
+                             columna_recorrido=None, columna_profesional=None,
+                             carpeta=None):
+    """Genera JSONs de transporte agrupando el Excel por la columna de recorrido
+    (por defecto NOMBRE DEL ACUDIENTE). Los datos del profesional se comparten
+    (se replican/heredan) entre todos los acudientes de ese profesional."""
+    carpeta = carpeta or JSONS_DIR
+    os.makedirs(carpeta, exist_ok=True)
+
+    transporte, hijo = _parse_template_transporte(template_transporte, template_hijo)
+    mapping = _parse_mapping(mapping, DEFAULT_MAPPING_TRANSPORTE)
+
+    col_recorrido = _find_named_column(df, columna_recorrido or DEFAULT_COLUMNA_RECORRIDO_TRANSPORTE)
+    if col_recorrido is None:
+        return 0, 0, (
+            f"No se encontró la columna de recorrido '{columna_recorrido or DEFAULT_COLUMNA_RECORRIDO_TRANSPORTE}' "
+            "en el Excel. Revísala en Configuraciones > Transportes."
+        ), []
+
+    # Columnas de nivel profesional que se comparten/heredan entre acudientes.
+    columnas_compartidas = []
+    if columna_profesional:
+        col = _find_named_column(df, columna_profesional)
+        if col is not None:
+            columnas_compartidas.append(col)
+    for patron in ("documento profesional", "cuenta profesional", "concepto general"):
+        col = _find_named_column(df, patron)
+        if col is not None and col not in columnas_compartidas:
+            columnas_compartidas.append(col)
+    df = df.copy()
+    for col in columnas_compartidas:
+        df[col] = df[col].ffill()
+
+    col_mapping = []
+    for item in mapping:
+        col = _find_named_column(df, item["excel"])
+        col_mapping.append({"json": item["json"], "excel": item["excel"], "col": col})
+
+    fecha = datetime.now().strftime("%m/%d/%Y")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    origen_base = os.path.splitext(os.path.basename(archivo_origen))[0]
+
+    carpeta_archivo = os.path.join(carpeta, f"{origen_base}_transporte_{timestamp}")
+    os.makedirs(carpeta_archivo, exist_ok=True)
+
+    total_json = 0
+    total_registros = 0
+    archivos_generados = []
+
+    for acudiente, grupo in df.groupby(col_recorrido, dropna=False):
+        registro = _to_str(acudiente)
+        if not registro:
+            continue
+
+        documento = deepcopy(transporte)
+        ingresos = []
+        for _, row in grupo.iterrows():
+            ingreso = deepcopy(hijo)
+            ingreso["fsoport"] = fecha
+            for item in col_mapping:
+                col = item["col"]
+                if col is None:
+                    continue
+                valor = row[col]
+                path = item["json"]
+                if path in ("ingresosegresos",) or "." in path and path.split(".")[0] == "ingresosegresos":
+                    key = path.split(".")[-1]
+                    if _is_numeric_field(key):
+                        ingreso[key] = _to_float(valor)
+                    else:
+                        ingreso[key] = _to_str(valor)
+                elif "." not in path:
+                    if _is_numeric_field(path):
+                        ingreso[path] = _to_float(valor)
+                    else:
+                        ingreso[path] = _to_str(valor)
+                else:
+                    _aplicar_mapeo_transporte(documento, ingreso, path, _to_str(valor))
+            ingresos.append(ingreso)
+
+        total = sum(float(i.get("mvalor") or 0.0) for i in ingresos)
+        total_registros += len(ingresos)
+
+        documento["ingresosegresos"] = ingresos
+
+        encabezado = documento.get("encabezado", {})
+        encabezado["fsoport"] = fecha
+        encabezado["fcreacion"] = fecha
+        encabezado["fultima"] = fecha
+        encabezado["mtotaloperacion"] = round(total, 2)
+
+        datos_principales = documento.get("datosprincipales", {})
+        if not datos_principales.get("init"):
+            datos_principales["init"] = registro
+
+        formapago = documento.get("formapago", {})
+        formapago["mtotalreg"] = "{:.8f}".format(total)
+        if not formapago.get("mtotalpago"):
+            formapago["mtotalpago"] = "{:.8f}".format(total)
+
+        nombre = f"{origen_base}_transporte_{_sanitize_filename(registro)}_{timestamp}.json"
         ruta = os.path.join(carpeta_archivo, nombre)
         with open(ruta, "w", encoding="utf-8") as f:
             json.dump(documento, f, ensure_ascii=False, indent=2)
