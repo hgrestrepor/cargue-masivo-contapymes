@@ -224,7 +224,40 @@ DEFAULT_JSON_TRANSPORTE = {
         "qpagosamortcxc": 0,
         "fpagocaja": [],
         "fpagobanco": [],
-        "fpagocxp": [],
+        "fpagocxp": [{
+            "id": 1,
+            "init": "",
+            "icuenta": "",
+            "qdiascxp": 30,
+            "qdiasvencim": 0,
+            "icc": "",
+            "nconcepto": "",
+            "ireferencia": "",
+            "binteresvencido": "F",
+            "itdperiodicidad": 0,
+            "pinteres": 0.0,
+            "pinteresmora": 0.0,
+            "bmoramaxima": "F",
+            "itdvalorcuota": 0,
+            "qcuotas": 0,
+            "valorcuotas": 0.0,
+            "qperiodicidad": 0,
+            "idia": 0,
+            "bcuotasespeciales": "F",
+            "mcuotaesp1": 0.0,
+            "mcuotaesp2": 0.0,
+            "mescuotaesp1": 0,
+            "mescuotaesp2": 0,
+            "bescalonadamente": "F",
+            "bmanual": "F",
+            "fprimeracuota": "12/30/1899",
+            "itdopcion": 0,
+            "icuotaopc": 0,
+            "mvalor": 0.0,
+            "mvrotramoneda": 0.0,
+            "bconceptochanged": "F",
+            "beditvrotramoneda": "F",
+        }],
         "fpagoamortcxc": [],
     },
 }
@@ -257,7 +290,10 @@ DEFAULT_MAPPING_TRANSPORTE = [
     {"json": "ingresosegresos.icuenta", "excel": "cuenta contable"},
     {"json": "ingresosegresos.mvalor", "excel": "valor"},
     {"json": "ingresosegresos.tdetalle", "excel": "concepto del detalle"},
-    {"json": "ingresosegresos.init", "excel": "numero de documento del acudiente"},
+    {"json": "formapago.fpagocxp.init", "excel": "documento profesional"},
+    {"json": "formapago.fpagocxp.icuenta", "excel": "cuenta profesional"},
+    {"json": "formapago.fpagocxp.nconcepto", "excel": "concepto general"},
+    {"json": "formapago.fpagocxp.mvalor", "excel": "valor"},
 ]
 
 DEFAULT_COLUMNA_RECORRIDO_TRANSPORTE = "NOMBRE DEL ACUDIENTE"
@@ -578,7 +614,10 @@ def _parse_template_transporte(template_transporte, template_hijo):
 
 
 def _aplicar_mapeo_transporte(documento, ingreso, path, valor):
-    """Asigna valor según la ruta JSON del mapeo de transportes."""
+    """Asigna valor según la ruta JSON del mapeo de transportes.
+
+    Soporta rutas que atraviesan listas (ej. formapago.fpagocxp.init):
+    aplica el valor a cada dict dentro de la lista."""
     if not path:
         return
     partes = [p for p in str(path).split(".") if p]
@@ -586,16 +625,30 @@ def _aplicar_mapeo_transporte(documento, ingreso, path, valor):
         return
     if partes[0] == "ingresosegresos":
         if len(partes) > 1:
-            ingreso[partes[1]] = valor
+            key = partes[1]
+            ingreso[key] = _to_float(valor) if _is_numeric_field(key) else _to_str(valor)
         return
-    cursor = documento
-    for parte in partes[:-1]:
-        siguiente = cursor.get(parte)
+
+    def _resolver(cursor, restantes):
+        parte = restantes[0]
+        resta = restantes[1:]
+        if isinstance(cursor, dict) and isinstance(cursor.get(parte), list):
+            for elemento in cursor[parte]:
+                if isinstance(elemento, dict) and resta:
+                    _resolver(elemento, resta)
+            return
+        if len(restantes) == 1:
+            clave = restantes[0]
+            cursor[clave] = _to_float(valor) if _is_numeric_field(clave) else _to_str(valor)
+            return
+        siguiente = cursor.get(parte) if isinstance(cursor, dict) else None
         if not isinstance(siguiente, dict):
             siguiente = {}
-            cursor[parte] = siguiente
-        cursor = siguiente
-    cursor[partes[-1]] = valor
+            if isinstance(cursor, dict):
+                cursor[parte] = siguiente
+        _resolver(siguiente, resta)
+
+    _resolver(documento, partes)
 
 
 def generar_jsons_transporte(df, archivo_origen, template_transporte=None,
@@ -610,6 +663,12 @@ def generar_jsons_transporte(df, archivo_origen, template_transporte=None,
 
     transporte, hijo = _parse_template_transporte(template_transporte, template_hijo)
     mapping = _parse_mapping(mapping, DEFAULT_MAPPING_TRANSPORTE)
+
+    campos_mapeados = {item["json"] for item in mapping}
+    for item in DEFAULT_MAPPING_TRANSPORTE:
+        if item["json"] not in campos_mapeados:
+            mapping.append(dict(item))
+            campos_mapeados.add(item["json"])
 
     col_recorrido = _find_named_column(df, columna_recorrido or DEFAULT_COLUMNA_RECORRIDO_TRANSPORTE)
     if col_recorrido is None:
@@ -676,7 +735,7 @@ def generar_jsons_transporte(df, archivo_origen, template_transporte=None,
                     else:
                         ingreso[path] = _to_str(valor)
                 else:
-                    _aplicar_mapeo_transporte(documento, ingreso, path, _to_str(valor))
+                    _aplicar_mapeo_transporte(documento, ingreso, path, valor)
             ingresos.append(ingreso)
 
         total = sum(float(i.get("mvalor") or 0.0) for i in ingresos)
@@ -696,8 +755,7 @@ def generar_jsons_transporte(df, archivo_origen, template_transporte=None,
 
         formapago = documento.get("formapago", {})
         formapago["mtotalreg"] = "{:.8f}".format(total)
-        if not formapago.get("mtotalpago"):
-            formapago["mtotalpago"] = "{:.8f}".format(total)
+        formapago["mtotalpago"] = "{:.8f}".format(total)
 
         nombre = f"{origen_base}_transporte_{_sanitize_filename(registro)}_{timestamp}.json"
         ruta = os.path.join(carpeta_archivo, nombre)
