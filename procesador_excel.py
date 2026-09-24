@@ -572,6 +572,11 @@ def generar_jsons(df, archivo_origen, template_padre=None, template_hijo=None,
         encabezado["fcreacion"] = fecha
         encabezado["fultima"] = fecha
         encabezado["mtotaloperacion"] = round(total, 2)
+        if filas_credito is not None and not filas_credito.empty:
+            col_obs = next((item["col"] for item in col_mapping
+                            if item["json"] == "tdetalle" and item["col"] is not None), None)
+            if col_obs is not None:
+                encabezado["tdetalle"] = _to_str(filas_credito.iloc[0][col_obs])
 
         datos_principales = documento.get("datosprincipales", {})
         datos_principales["init"] = _to_str(tercero)
