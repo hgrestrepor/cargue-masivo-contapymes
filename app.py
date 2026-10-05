@@ -191,7 +191,9 @@ def upload():
 
         exitosos = 0
         fallidos = []
-        for ruta in archivos_generados:
+        for item in archivos_generados:
+            ruta = item["ruta"]
+            tercero = item.get("tercero", "")
             try:
                 with open(ruta, "r", encoding="utf-8") as f:
                     oprdata = json.load(f)
@@ -202,6 +204,7 @@ def upload():
                     exitosos += 1
                 else:
                     fallidos.append({
+                        "tercero": tercero,
                         "archivo": ruta,
                         "mensaje": enc.get("mensaje", "Sin mensaje"),
                         "imensaje": enc.get("imensaje", ""),
@@ -209,6 +212,7 @@ def upload():
                     })
             except Exception as exc:
                 fallidos.append({
+                    "tercero": tercero,
                     "archivo": ruta,
                     "mensaje": mensaje_error(exc),
                     "imensaje": "",
@@ -219,17 +223,20 @@ def upload():
             palabra = "documento soporte creado con éxito" if exitosos == 1 else "documentos soporte creados con éxito"
             flash(f"{exitosos} {palabra}", "success")
         else:
+            terceros_fallidos = ", ".join(f.get("tercero") or "sin tercero" for f in fallidos)
             flash(
                 f"Archivo '{file.filename}' procesado. Registros: {num_registros}. "
-                f"JSON generados: {creados}. Enviados: {exitosos}. Fallidos: {len(fallidos)}.",
+                f"JSON generados: {creados}. Enviados: {exitosos}. Fallidos: {len(fallidos)}. "
+                f"Terceros fallidos: {terceros_fallidos}",
                 "warning",
             )
             for fallo in fallidos:
                 mensaje = fallo.get("detalle") or fallo.get("mensaje") or "Sin detalle"
                 endpoint_msg = fallo.get("mensaje") or ""
-                flash(f"[FALLIDO] {fallo['archivo']}: {mensaje}", "danger")
+                etiqueta = f"Tercero {fallo['tercero']} - " if fallo.get("tercero") else ""
+                flash(f"[FALLIDO] {etiqueta}{mensaje}", "danger")
                 if endpoint_msg and (not fallo.get("detalle") or endpoint_msg != fallo.get("detalle")):
-                    flash(f"Respuesta del endpoint: {endpoint_msg}", "danger")
+                    flash(f"[Tercero {fallo.get('tercero') or 'sin tercero'}] Respuesta del endpoint: {endpoint_msg}", "danger")
     except Exception as e:
         log_upload(file.filename, False, 0, tipo="Madres", usuario=session.get("username", ""))
         flash(f"Error al procesar el archivo: {mensaje_error(e)}", "danger")
@@ -335,7 +342,9 @@ def upload_transportes():
 
         exitosos = 0
         fallidos = []
-        for ruta in archivos_generados:
+        for item in archivos_generados:
+            ruta = item["ruta"]
+            registro = item.get("tercero", "")
             try:
                 with open(ruta, "r", encoding="utf-8") as f:
                     oprdata = json.load(f)
@@ -346,6 +355,7 @@ def upload_transportes():
                     exitosos += 1
                 else:
                     fallidos.append({
+                        "registro": registro,
                         "archivo": ruta,
                         "mensaje": enc.get("mensaje", "Sin mensaje"),
                         "imensaje": enc.get("imensaje", ""),
@@ -353,6 +363,7 @@ def upload_transportes():
                     })
             except Exception as exc:
                 fallidos.append({
+                    "registro": registro,
                     "archivo": ruta,
                     "mensaje": mensaje_error(exc),
                     "imensaje": "",
@@ -363,17 +374,20 @@ def upload_transportes():
             palabra = "documento soporte creado con éxito" if exitosos == 1 else "documentos soporte creados con éxito"
             flash(f"{exitosos} {palabra}", "success")
         else:
+            registros_fallidos = ", ".join(f.get("registro") or "sin dato" for f in fallidos)
             flash(
                 f"Archivo '{file.filename}' procesado. Registros: {num_registros}. "
-                f"JSON generados: {creados}. Enviados: {exitosos}. Fallidos: {len(fallidos)}.",
+                f"JSON generados: {creados}. Enviados: {exitosos}. Fallidos: {len(fallidos)}. "
+                f"Registros fallidos: {registros_fallidos}",
                 "warning",
             )
             for fallo in fallidos:
                 mensaje = fallo.get("detalle") or fallo.get("mensaje") or "Sin detalle"
                 endpoint_msg = fallo.get("mensaje") or ""
-                flash(f"[FALLIDO] {fallo['archivo']}: {mensaje}", "danger")
+                etiqueta = f"Registro {fallo['registro']} - " if fallo.get("registro") else ""
+                flash(f"[FALLIDO] {etiqueta}{mensaje}", "danger")
                 if endpoint_msg and (not fallo.get("detalle") or endpoint_msg != fallo.get("detalle")):
-                    flash(f"Respuesta del endpoint: {endpoint_msg}", "danger")
+                    flash(f"[Registro {fallo.get('registro') or 'sin dato'}] Respuesta del endpoint: {endpoint_msg}", "danger")
     except Exception as e:
         log_upload(file.filename, False, 0, tipo="Transportes", usuario=session.get("username", ""))
         flash(f"Error al procesar el archivo: {mensaje_error(e)}", "danger")

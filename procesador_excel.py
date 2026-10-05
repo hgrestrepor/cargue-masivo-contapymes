@@ -2,14 +2,14 @@ import json
 import os
 import re
 from copy import deepcopy
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pandas as pd
 
 JSONS_DIR = os.path.join(os.path.dirname(__file__), "jsons")
 
-FORMATO_FECHA = "%d/%m/%Y"
-FECHA_VACIA = "30/12/1899"
+FORMATO_FECHA = "%m/%d/%Y"
+FECHA_VACIA = "12/30/1899"
 
 DEFAULT_MAPPING = [
     {"json": "icc", "excel": "centro de costos"},
@@ -406,6 +406,12 @@ def _sanitize_filename(value):
     return name or "sin_tercero"
 
 
+def _fecha_contable():
+    """30 del mes anterior a la fecha actual, formato mm/dd/aaaa."""
+    ultimo_dia_mes_anterior = datetime.now().replace(day=1) - timedelta(days=1)
+    return datetime(ultimo_dia_mes_anterior.year, ultimo_dia_mes_anterior.month, 30).strftime(FORMATO_FECHA)
+
+
 def _parse_template(template, default):
     if isinstance(template, dict):
         return deepcopy(template)
@@ -464,6 +470,30 @@ def _find_named_column(df, nombre):
     return _column_exists(df, target)
 
 
+def _bloques_por_tercero(serie):
+    """Divide las filas en bloques consecutivos según la columna de terceros.
+
+    Una celda vacía significa que la fila pertenece al mismo tercero de la
+    fila anterior (el valor se arrastra hacia abajo). Solo se abre un bloque
+    nuevo cuando aparece un tercero distinto al anterior."""
+    bloques = []
+    actual = ""
+    posiciones = []
+    for posicion, valor in enumerate(serie.tolist()):
+        tercero = _to_str(valor)
+        if tercero:
+            if actual and tercero != actual:
+                bloques.append((actual, posiciones))
+                posiciones = []
+            actual = tercero
+        if not actual:
+            continue
+        posiciones.append(posicion)
+    if posiciones:
+        bloques.append((actual, posiciones))
+    return bloques
+
+
 def _parse_mapping(mapping_raw, default=None):
     if default is None:
         default = DEFAULT_MAPPING
@@ -520,7 +550,7 @@ def generar_jsons(df, archivo_origen, template_padre=None, template_hijo=None,
         col = _column_exists(df, item["excel"])
         col_mapping.append({"json": item["json"], "excel": item["excel"], "col": col})
 
-    fecha = datetime.now().strftime(FORMATO_FECHA)
+    fecha = _fecha_contable()
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     naturaleza_col = _find_column(df, NATURALEZA_PATTERNS, NATURALEZA_CONTAINS)
@@ -531,8 +561,14 @@ def generar_jsons(df, archivo_origen, template_padre=None, template_hijo=None,
     total_json = 0
     total_registros = 0
     archivos_generados = []
+    nombres_usados = set()
 
-    for tercero, grupo in df.groupby(tercero_col):
+    bloques = _bloques_por_tercero(df[tercero_col])
+    if not bloques:
+        return 0, 0, "La columna de Tercero no tiene ningún valor.", []
+
+    for tercero, posiciones in bloques:
+        grupo = df.iloc[posiciones]
         filas_debito = grupo
         filas_credito = None
         if naturaleza_col is not None:
@@ -556,12 +592,25 @@ def generar_jsons(df, archivo_origen, template_padre=None, template_hijo=None,
             ingresos.append(ingreso)
 
         total = 0.0
+        col_obs = next((item["col"] for item in col_mapping
+                        if item["json"] == "tdetalle" and item["col"] is not None), None)
+        col_icc = next((item["col"] for item in col_mapping
+                        if item["json"] == "icc" and item["col"] is not None), None)
+
+        obs_credito = ""
+        icc_credito = ""
         if filas_credito is not None and not filas_credito.empty:
             fila_credito = filas_credito.iloc[0]
+            if col_obs is not None:
+                obs_credito = _to_str(fila_credito[col_obs])
+            if col_icc is not None:
+                icc_credito = _to_str(fila_credito[col_icc])
             for item in col_mapping:
                 if item["json"] == "mvalor" and item["col"] is not None:
                     total = _to_float(fila_credito[item["col"]])
                     break
+        if not icc_credito and col_icc is not None and not grupo.empty:
+            icc_credito = _to_str(grupo.iloc[0][col_icc])
         if total == 0.0:
             total = sum(float(i.get("mvalor") or 0.0) for i in ingresos)
 
@@ -578,11 +627,8 @@ def generar_jsons(df, archivo_origen, template_padre=None, template_hijo=None,
         if usuario:
             encabezado["iusuario"] = usuario
             encabezado["iusuarioult"] = usuario
-        if filas_credito is not None and not filas_credito.empty:
-            col_obs = next((item["col"] for item in col_mapping
-                            if item["json"] == "tdetalle" and item["col"] is not None), None)
-            if col_obs is not None:
-                encabezado["tdetalle"] = _to_str(filas_credito.iloc[0][col_obs])
+        if obs_credito:
+            encabezado["tdetalle"] = obs_credito
 
         datos_principales = documento.get("datosprincipales", {})
         datos_principales["init"] = _to_str(tercero)
@@ -594,12 +640,22 @@ def generar_jsons(df, archivo_origen, template_padre=None, template_hijo=None,
         for item in fpagocxp:
             item["init"] = _to_str(tercero)
             item["mvalor"] = round(total, 2)
+            if icc_credito:
+                item["icc"] = icc_credito
+            if obs_credito:
+                item["nconcepto"] = obs_credito
 
-        nombre = f"{origen_base}_{_sanitize_filename(tercero)}_{timestamp}.json"
+        base_nombre = f"{origen_base}_{_sanitize_filename(tercero)}_{timestamp}"
+        nombre = f"{base_nombre}.json"
+        sufijo = 2
+        while nombre in nombres_usados:
+            nombre = f"{base_nombre}_{sufijo}.json"
+            sufijo += 1
+        nombres_usados.add(nombre)
         ruta = os.path.join(carpeta_archivo, nombre)
         with open(ruta, "w", encoding="utf-8") as f:
             json.dump(documento, f, ensure_ascii=False, indent=2)
-        archivos_generados.append(ruta)
+        archivos_generados.append({"ruta": ruta, "tercero": _to_str(tercero)})
         total_json += 1
 
     return total_json, total_registros, None, archivos_generados
@@ -707,7 +763,7 @@ def generar_jsons_transporte(df, archivo_origen, template_transporte=None,
         col = _find_named_column(df, item["excel"])
         col_mapping.append({"json": item["json"], "excel": item["excel"], "col": col})
 
-    fecha = datetime.now().strftime(FORMATO_FECHA)
+    fecha = _fecha_contable()
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     origen_base = os.path.splitext(os.path.basename(archivo_origen))[0]
 
@@ -775,7 +831,7 @@ def generar_jsons_transporte(df, archivo_origen, template_transporte=None,
         ruta = os.path.join(carpeta_archivo, nombre)
         with open(ruta, "w", encoding="utf-8") as f:
             json.dump(documento, f, ensure_ascii=False, indent=2)
-        archivos_generados.append(ruta)
+        archivos_generados.append({"ruta": ruta, "tercero": _to_str(registro)})
         total_json += 1
 
     return total_json, total_registros, None, archivos_generados
