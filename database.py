@@ -7,9 +7,22 @@ from procesador_excel import (
     DEFAULT_JSON_HIJO, DEFAULT_JSON_PADRE, DEFAULT_MAPPING,
     DEFAULT_JSON_TRANSPORTE, DEFAULT_JSON_TRANSPORTE_HIJO, DEFAULT_MAPPING_TRANSPORTE,
     DEFAULT_COLUMNA_RECORRIDO_TRANSPORTE, DEFAULT_COLUMNA_PROFESIONAL_TRANSPORTE,
+    FECHA_VACIA,
 )
 
+FECHA_VACIA_ANTIGUA = "12/30/1899"
+
+
+def _normalizar_fechas(texto):
+    """Convierte el centinela de fecha vacia al formato dd/mm/aaaa."""
+    if texto and FECHA_VACIA_ANTIGUA in texto:
+        return texto.replace(FECHA_VACIA_ANTIGUA, FECHA_VACIA)
+    return texto
+
 DB_PATH = "users.db"
+
+EMAIL_POR_DEFECTO = "jorge.galeano@nubeapps.com.co"
+PASSWORD_POR_DEFECTO = "ca577d43a3cc06f1e88bc9114ad6b75c"
 
 
 def get_connection():
@@ -164,8 +177,8 @@ def get_config_json():
         ("mapeo", "'[]'"),
         ("ep_ip", "'190.71.116.82'"),
         ("ep_puerto", "'9000'"),
-        ("ep_email", "''"),
-        ("ep_password", "''"),
+        ("ep_email", f"'{EMAIL_POR_DEFECTO}'"),
+        ("ep_password", f"'{PASSWORD_POR_DEFECTO}'"),
         ("ep_iapp", "'1001'"),
         ("ep_idmaquina", "'POSTMAN-TEST'"),
         ("ep_keyagente", "''"),
@@ -205,7 +218,8 @@ def get_config_json():
         conn.commit()
         return {
             "json_padre": default_padre, "json_hijo": default_hijo, "mapeo": default_mapeo,
-            "ep_ip": "190.71.116.82", "ep_puerto": "9000", "ep_email": "", "ep_password": "",
+            "ep_ip": "190.71.116.82", "ep_puerto": "9000",
+            "ep_email": EMAIL_POR_DEFECTO, "ep_password": PASSWORD_POR_DEFECTO,
             "ep_iapp": "1001", "ep_idmaquina": "POSTMAN-TEST", "ep_keyagente": "",
             "json_transporte": default_transporte,
             "json_transporte_hijo": default_transporte_hijo,
@@ -249,6 +263,21 @@ def get_config_json():
         if not columna_profesional_transporte:
             columna_profesional_transporte = DEFAULT_COLUMNA_PROFESIONAL_TRANSPORTE
             actualizar = True
+        for nombre, valor in (("contenido", contenido),
+                              ("contenido_hijo", contenido_hijo),
+                              ("contenido_transporte", contenido_transporte),
+                              ("contenido_transporte_hijo", contenido_transporte_hijo)):
+            normalizado = _normalizar_fechas(valor)
+            if normalizado != valor:
+                actualizar = True
+                if nombre == "contenido":
+                    contenido = normalizado
+                elif nombre == "contenido_hijo":
+                    contenido_hijo = normalizado
+                elif nombre == "contenido_transporte":
+                    contenido_transporte = normalizado
+                else:
+                    contenido_transporte_hijo = normalizado
         if actualizar:
             cursor.execute(
                 "UPDATE config_json SET contenido = ?, contenido_hijo = ?, mapeo = ?, contenido_transporte = ?, "

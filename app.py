@@ -25,6 +25,7 @@ from procesador_excel import (
 
 app = Flask(__name__)
 app.secret_key = "cargue-ceder-secret-key-2026"
+app.config["TEMPLATES_AUTO_RELOAD"] = True
 
 UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), "uploads")
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
@@ -139,7 +140,8 @@ def upload():
         json_hijo = cfg["json_hijo"]
         mapeo = cfg["mapeo"]
         creados, registros_json, error, archivos_generados = generar_jsons(
-            df, file.filename, json_padre, json_hijo, mapeo
+            df, file.filename, json_padre, json_hijo, mapeo,
+            usuario=session.get("username", ""),
         )
         if error:
             log_upload(file.filename, False, num_registros, tipo="Madres", usuario=session.get("username", ""))
@@ -275,6 +277,7 @@ def upload_transportes():
             mapping=mapeo_transporte,
             columna_recorrido=columna_recorrido,
             columna_profesional=columna_profesional,
+            usuario=session.get("username", ""),
         )
         if error:
             log_upload(file.filename, False, num_registros, tipo="Transportes", usuario=session.get("username", ""))

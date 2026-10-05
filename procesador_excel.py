@@ -8,6 +8,9 @@ import pandas as pd
 
 JSONS_DIR = os.path.join(os.path.dirname(__file__), "jsons")
 
+FORMATO_FECHA = "%d/%m/%Y"
+FECHA_VACIA = "30/12/1899"
+
 DEFAULT_MAPPING = [
     {"json": "icc", "excel": "centro de costos"},
     {"json": "icuenta", "excel": "Cta contable"},
@@ -44,13 +47,13 @@ DEFAULT_JSON_PADRE = {
         "svaloradic10": "",
         "svaloradic11": "",
         "svaloradic12": "",
-        "fecha1adic": "12/30/1899",
-        "fecha2adic": "12/30/1899",
-        "fecha3adic": "12/30/1899",
+        "fecha1adic": FECHA_VACIA,
+        "fecha2adic": FECHA_VACIA,
+        "fecha3adic": FECHA_VACIA,
         "datosaddin": "",
         "fcreacion": "",
         "fultima": "",
-        "fprocesam": "12/30/1899",
+        "fprocesam": FECHA_VACIA,
         "iusuario": "ADMIN",
         "iusuarioult": "ADMIN",
         "isucursal": "",
@@ -105,7 +108,7 @@ DEFAULT_JSON_PADRE = {
                 "mescuotaesp2": 0,
                 "bescalonadamente": "F",
                 "bmanual": "F",
-                "fprimeracuota": "12/30/1899",
+                "fprimeracuota": FECHA_VACIA,
                 "itdopcion": 0,
                 "icuotaopc": 0,
                 "mvalor": 0.0,
@@ -190,13 +193,13 @@ DEFAULT_JSON_TRANSPORTE = {
         "svaloradic10": "",
         "svaloradic11": "",
         "svaloradic12": "",
-        "fecha1adic": "12/30/1899",
-        "fecha2adic": "12/30/1899",
-        "fecha3adic": "12/30/1899",
+        "fecha1adic": FECHA_VACIA,
+        "fecha2adic": FECHA_VACIA,
+        "fecha3adic": FECHA_VACIA,
         "datosaddin": "",
         "fcreacion": "",
         "fultima": "",
-        "fprocesam": "12/30/1899",
+        "fprocesam": FECHA_VACIA,
         "iusuario": "",
         "iusuarioult": "",
         "isucursal": "",
@@ -250,7 +253,7 @@ DEFAULT_JSON_TRANSPORTE = {
             "mescuotaesp2": 0,
             "bescalonadamente": "F",
             "bmanual": "F",
-            "fprimeracuota": "12/30/1899",
+            "fprimeracuota": FECHA_VACIA,
             "itdopcion": 0,
             "icuotaopc": 0,
             "mvalor": 0.0,
@@ -487,7 +490,7 @@ def _parse_mapping(mapping_raw, default=None):
 
 
 def generar_jsons(df, archivo_origen, template_padre=None, template_hijo=None,
-                  mapping=None, carpeta=None):
+                  mapping=None, carpeta=None, usuario=None):
     carpeta = carpeta or JSONS_DIR
     os.makedirs(carpeta, exist_ok=True)
 
@@ -517,7 +520,7 @@ def generar_jsons(df, archivo_origen, template_padre=None, template_hijo=None,
         col = _column_exists(df, item["excel"])
         col_mapping.append({"json": item["json"], "excel": item["excel"], "col": col})
 
-    fecha = datetime.now().strftime("%m/%d/%Y")
+    fecha = datetime.now().strftime(FORMATO_FECHA)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     naturaleza_col = _find_column(df, NATURALEZA_PATTERNS, NATURALEZA_CONTAINS)
@@ -572,6 +575,9 @@ def generar_jsons(df, archivo_origen, template_padre=None, template_hijo=None,
         encabezado["fcreacion"] = fecha
         encabezado["fultima"] = fecha
         encabezado["mtotaloperacion"] = round(total, 2)
+        if usuario:
+            encabezado["iusuario"] = usuario
+            encabezado["iusuarioult"] = usuario
         if filas_credito is not None and not filas_credito.empty:
             col_obs = next((item["col"] for item in col_mapping
                             if item["json"] == "tdetalle" and item["col"] is not None), None)
@@ -659,7 +665,7 @@ def _aplicar_mapeo_transporte(documento, ingreso, path, valor):
 def generar_jsons_transporte(df, archivo_origen, template_transporte=None,
                              template_hijo=None, mapping=None,
                              columna_recorrido=None, columna_profesional=None,
-                             carpeta=None):
+                             carpeta=None, usuario=None):
     """Genera JSONs de transporte agrupando el Excel por la columna de recorrido
     (por defecto NOMBRE DEL ACUDIENTE). Los datos del profesional se comparten
     (se replican/heredan) entre todos los acudientes de ese profesional."""
@@ -701,7 +707,7 @@ def generar_jsons_transporte(df, archivo_origen, template_transporte=None,
         col = _find_named_column(df, item["excel"])
         col_mapping.append({"json": item["json"], "excel": item["excel"], "col": col})
 
-    fecha = datetime.now().strftime("%m/%d/%Y")
+    fecha = datetime.now().strftime(FORMATO_FECHA)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     origen_base = os.path.splitext(os.path.basename(archivo_origen))[0]
 
@@ -753,6 +759,9 @@ def generar_jsons_transporte(df, archivo_origen, template_transporte=None,
         encabezado["fcreacion"] = fecha
         encabezado["fultima"] = fecha
         encabezado["mtotaloperacion"] = round(total, 2)
+        if usuario:
+            encabezado["iusuario"] = usuario
+            encabezado["iusuarioult"] = usuario
 
         datos_principales = documento.get("datosprincipales", {})
         if not datos_principales.get("init"):

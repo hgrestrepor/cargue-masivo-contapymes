@@ -45,11 +45,15 @@
                             <div class="col-md-6">
                                 <label class="form-label fw-bold">Email</label>
                                 <input type="text" name="ep_email" id="ep_email" class="form-control" value="{{ ep_email }}" placeholder="El administrador debe ingresar el correo">
-                                <div class="form-text">Al escribir el correo, el Password (MD5) se completa automáticamente.</div>
+                                <div class="form-text">Si el Password está vacío, se completa solo con el MD5 del correo.</div>
                             </div>
                             <div class="col-md-6">
                                 <label class="form-label fw-bold">Password (MD5)</label>
-                                <input type="text" name="ep_password" id="ep_password" class="form-control font-monospace" value="{{ ep_password }}" placeholder="MD5 del correo en mayúsculas" readonly>
+                                <div class="input-group">
+                                    <input type="text" name="ep_password" id="ep_password" class="form-control font-monospace" value="{{ ep_password }}" placeholder="MD5 del correo en minúsculas">
+                                    <button class="btn btn-outline-secondary" type="button" id="btn_calcular_md5" title="Calcular el MD5 a partir del correo">Calcular MD5</button>
+                                </div>
+                                <div class="form-text">Editable. Se envía tal cual al endpoint. Si lo dejas vacío se calcula el MD5 del correo (en minúsculas).</div>
                             </div>
                             <div class="col-md-6">
                                 <label class="form-label fw-bold">ID Máquina</label>
@@ -450,14 +454,31 @@ document.getElementById('mostrarJsonTransporteCheck').addEventListener('change',
 
     var emailField = document.getElementById('ep_email');
     var md5Field = document.getElementById('ep_password');
-    if (emailField) {
-        emailField.addEventListener('input', function() {
-            var valor = this.value.trim();
-            if (valor) {
-                md5Field.value = md5(valor.toLowerCase());
-            } else {
-                md5Field.value = '';
-            }
+    var btnMd5 = document.getElementById('btn_calcular_md5');
+
+    function calcularMd5() {
+        var valor = (emailField.value || '').trim();
+        if (!valor) {
+            md5Field.value = '';
+            return;
+        }
+        md5Field.value = md5(valor.toLowerCase());
+        md5Field.dataset.editado = '';
+    }
+
+    if (emailField && md5Field) {
+        md5Field.addEventListener('input', function () {
+            this.dataset.editado = '1';
+        });
+        emailField.addEventListener('input', function () {
+            if (md5Field.dataset.editado === '1') return;
+            if (md5Field.value.trim() !== '') return;
+            calcularMd5();
+        });
+    }
+    if (btnMd5 && emailField && md5Field) {
+        btnMd5.addEventListener('click', function () {
+            calcularMd5();
         });
     }
 })();
