@@ -13,6 +13,7 @@ from flask import (
     flash,
     jsonify,
     get_flashed_messages,
+    send_file,
 )
 from database import (
     init_db, verify_user, create_user, get_all_users, delete_user,
@@ -29,6 +30,8 @@ app.config["TEMPLATES_AUTO_RELOAD"] = True
 
 UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), "uploads")
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+PLANTILLA_EXCEL_MADRES = os.path.join(os.path.dirname(__file__), "plantilla_excel_madres.xlsx")
 
 
 def login_required(f):
@@ -96,6 +99,20 @@ def login():
 @login_required
 def dashboard():
     return render_template("dashboard.html")
+
+
+@app.route("/plantilla-madres")
+@login_required
+def plantilla_madres():
+    """Descarga la plantilla de Excel de madres (plantilla_excel_madres.xlsx)."""
+    if not os.path.exists(PLANTILLA_EXCEL_MADRES):
+        flash("No se encontró la plantilla de Excel de madres.", "danger")
+        return responder(url_for("dashboard"), ok=False)
+    return send_file(
+        PLANTILLA_EXCEL_MADRES,
+        as_attachment=True,
+        download_name="plantilla_excel_madres.xlsx",
+    )
 
 
 @app.route("/dashboard-transportes")

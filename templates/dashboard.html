@@ -29,6 +29,29 @@
         </div>
     </div>
 </div>
+
+<div class="row justify-content-center mt-4">
+    <div class="col-md-10">
+        <div class="card shadow">
+            <div class="card-header bg-light text-center">
+                <h5 class="mb-0">Plantilla y ejemplo de estructura</h5>
+            </div>
+            <div class="card-body p-4 text-center">
+                <a href="{{ url_for('plantilla_madres') }}" class="btn btn-outline-primary mb-3">
+                    Descargar plantilla Excel (plantilla_excel_madres.xlsx)
+                </a>
+                <p class="text-muted small mb-3">
+                    Así debe verse el archivo: fila de <strong>Naturaleza</strong> sobre las columnas C, D y E,
+                    marcas <strong>d</strong> (débito) y <strong>c</strong> (crédito), y debajo los encabezados
+                    con una fila de ejemplo por cada cédula.
+                </p>
+                <img src="{{ url_for('static', filename='plantilla_madres.jpeg') }}"
+                     alt="Ejemplo plantilla madres"
+                     class="img-fluid border rounded">
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block scripts %}

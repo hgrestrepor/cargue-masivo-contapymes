@@ -521,6 +521,29 @@ def _fila_marcas_columnas(matriz, posicion_encabezado):
     return None
 
 
+def _es_cuenta_numerica(cabecera):
+    """Encabezado que es una cuenta puramente numérica (ej. 6165950116)."""
+    texto = _to_str(cabecera).replace(" ", "")
+    return bool(texto) and texto.isdigit()
+
+
+def _marcas_por_defecto(matriz, posicion_encabezado):
+    """Sin naturaleza definida, el formato ancho asume C y D débito y E crédito.
+
+    Solo se aplica si la fila del encabezado NO trae una columna de naturaleza
+    (no está definida) y las columnas C, D y E son cuentas numéricas. Si la
+    planilla trae fila de marcas o columna de naturaleza, no se usa este
+    defecto."""
+    encabezados = [_to_str(valor) for valor in matriz[posicion_encabezado]]
+    if len(encabezados) < 5:
+        return None
+    if any(_es_columna_naturaleza(cabecera) for cabecera in encabezados):
+        return None
+    if not all(_es_cuenta_numerica(encabezados[i]) for i in (2, 3, 4)):
+        return None
+    return [(2, "D"), (3, "D"), (4, "C")]
+
+
 def _preparar_dataframe(df, max_filas=20):
     """Detecta el encabezado real y el formato ancho (una columna por cuenta).
 
@@ -542,18 +565,24 @@ def _preparar_dataframe(df, max_filas=20):
         return df, None
 
     marcas = _fila_marcas_columnas(matriz, posicion_encabezado)
+    posicion_marcas = None
+    if marcas is not None:
+        posicion_marcas, celdas = marcas
+    else:
+        celdas = _marcas_por_defecto(matriz, posicion_encabezado)
 
-    if marcas is None:
+    if celdas is None:
         if posicion_encabezado == 0:
             return df, None
         nuevo = df.iloc[posicion_encabezado:].copy()
         nuevo.columns = _nombres_unicos([_to_str(valor) for valor in matriz[posicion_encabezado]])
         return nuevo, None
 
-    posicion_marcas, celdas = marcas
     columnas = _nombres_unicos([_to_str(valor) for valor in matriz[posicion_encabezado]])
     datos = df.iloc[posicion_encabezado:].copy()
-    indice_marcas = posicion_marcas - 1 - posicion_encabezado
+    indice_marcas = (
+        posicion_marcas - 1 - posicion_encabezado if posicion_marcas is not None else -1
+    )
     if indice_marcas >= 0:
         datos = datos.iloc[[i for i in range(len(datos)) if i != indice_marcas]]
     datos.columns = columnas
