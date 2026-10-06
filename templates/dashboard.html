@@ -16,7 +16,10 @@
                         <input type="file" name="excel_file" class="form-control" accept=".xlsx,.xls" required>
                     </div>
                     <p class="text-muted small mb-3">
-                        El excel debe tener la siguiente estructura: <strong>Cta contable, Naturaleza, valor, tercero, observacion</strong>
+                        El excel debe tener la columna <strong>cedula</strong> (agrupa los movimientos) y la naturaleza
+                        en la columna <strong>Naturaleza</strong> o, si no viene con nombre, en las
+                        <strong>columnas C, D y E</strong> (D = débito, C = crédito).
+                        Resto de columnas: <strong>Cta contable, valor, observacion, centro de costos</strong>.
                     </p>
                     <button type="submit" class="btn btn-success btn-lg">
                         Cargar Excel

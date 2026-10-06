@@ -223,20 +223,20 @@ def upload():
             palabra = "documento soporte creado con éxito" if exitosos == 1 else "documentos soporte creados con éxito"
             flash(f"{exitosos} {palabra}", "success")
         else:
-            terceros_fallidos = ", ".join(f.get("tercero") or "sin tercero" for f in fallidos)
+            cedulas_fallidas = ", ".join(f.get("tercero") or "sin dato" for f in fallidos)
             flash(
                 f"Archivo '{file.filename}' procesado. Registros: {num_registros}. "
                 f"JSON generados: {creados}. Enviados: {exitosos}. Fallidos: {len(fallidos)}. "
-                f"Terceros fallidos: {terceros_fallidos}",
+                f"Cédulas fallidas: {cedulas_fallidas}",
                 "warning",
             )
             for fallo in fallidos:
                 mensaje = fallo.get("detalle") or fallo.get("mensaje") or "Sin detalle"
                 endpoint_msg = fallo.get("mensaje") or ""
-                etiqueta = f"Tercero {fallo['tercero']} - " if fallo.get("tercero") else ""
+                etiqueta = f"Cédula {fallo['tercero']} - " if fallo.get("tercero") else ""
                 flash(f"[FALLIDO] {etiqueta}{mensaje}", "danger")
                 if endpoint_msg and (not fallo.get("detalle") or endpoint_msg != fallo.get("detalle")):
-                    flash(f"[Tercero {fallo.get('tercero') or 'sin tercero'}] Respuesta del endpoint: {endpoint_msg}", "danger")
+                    flash(f"[Cédula {fallo.get('tercero') or 'sin dato'}] Respuesta del endpoint: {endpoint_msg}", "danger")
     except Exception as e:
         log_upload(file.filename, False, 0, tipo="Madres", usuario=session.get("username", ""))
         flash(f"Error al procesar el archivo: {mensaje_error(e)}", "danger")

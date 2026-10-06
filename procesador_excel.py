@@ -340,6 +340,19 @@ OBS_CONTAINS = ["observ", "detalle", "glosa"]
 NATURALEZA_PATTERNS = {"naturaleza", "tipomovimiento", "movimiento", "tipo", "dc", "db", "cr", "debito", "credito"}
 NATURALEZA_CONTAINS = ["natur", "movimiento", "debito", "credito", "tipomov"]
 
+CEDULA_PATTERNS = {
+    "cedula",
+    "cédula",
+    "numcedula",
+    "numerocedula",
+    "idcedula",
+    "cedulaciudadana",
+}
+CEDULA_CONTAINS = ["cedula", "cédula"]
+
+DEBITO_VALUES = {"D", "DB", "DEBITO", "DEBITOS", "DÉBITO", "DÉBITOS"}
+CREDITO_VALUES = {"C", "CR", "CREDITO", "CREDITOS", "CRÉDITO", "CRÉDITOS"}
+
 
 def _normalize(col):
     return str(col).strip().lower().replace("_", "").replace("-", "").replace(" ", "")
@@ -356,6 +369,236 @@ def _find_column(df, patterns, contains=None):
                 if token in normalized:
                     return col
     return None
+
+
+def _es_columna_naturaleza(col):
+    normalizada = _normalize(col)
+    if normalizada in NATURALEZA_PATTERNS:
+        return True
+    return any(token in normalizada for token in NATURALEZA_CONTAINS)
+
+
+def _columna_tiene_marcas(serie):
+    """True si la columna tiene al menos una celda marcada como D o C."""
+    for valor in serie:
+        if _to_str(valor).upper() in DEBITO_VALUES or _to_str(valor).upper() in CREDITO_VALUES:
+            return True
+    return False
+
+
+def _columna_es_naturaleza(serie, proporcion_minima=0.6):
+    """True si la mayoría de los valores no vacíos de la columna son marcas D/C.
+
+    Se usa para las columnas que se asumen por posición (C, D y E) y para las
+    vecinas de un encabezado combinado, así una letra suelta en otra columna
+    (ej. una observación que empiece por 'C') no se toma como naturaleza.
+    """
+    valores = [v for v in (_to_str(valor).upper() for valor in serie) if v]
+    if not valores:
+        return False
+    marcas = sum(1 for valor in valores if valor in DEBITO_VALUES or valor in CREDITO_VALUES)
+    if not marcas:
+        return False
+    return (marcas / len(valores)) >= proporcion_minima
+
+
+def _columnas_naturaleza(df):
+    """Columnas del Excel que definen la naturaleza (D/C) de cada fila.
+
+    1. Usa las columnas con nombre de naturaleza. Si el encabezado viene
+       combinado (una sola celda 'Naturaleza' sobre varias columnas), las
+       columnas vecinas quedan como 'Unnamed' y se agregan solo si traen
+       mayoritariamente marcas D/C.
+    2. Si no hay ninguna con nombre, toma las columnas C, D y E del Excel
+       (solo las que traigan marcas D/C).
+    3. Si ninguna trae marcas D/C, devuelve lista vacía (todas las filas se
+       toman como débito, como cuando no existía la columna naturaleza).
+    """
+    columnas = list(df.columns)
+    encontradas = [col for col in columnas if _es_columna_naturaleza(col)]
+
+    for col in list(encontradas):
+        inicio = columnas.index(col)
+        for posicion in range(inicio + 1, min(inicio + 3, len(columnas))):
+            vecina = columnas[posicion]
+            if vecina in encontradas:
+                continue
+            if _normalize(vecina).startswith("unnamed") and _columna_es_naturaleza(df[vecina]):
+                encontradas.append(vecina)
+
+    con_marcas = [col for col in encontradas if _columna_tiene_marcas(df[col])]
+    if con_marcas:
+        return con_marcas
+
+    if len(columnas) >= 5:
+        posicionales = [col for col in columnas[2:5] if _columna_es_naturaleza(df[col])]
+        if posicionales:
+            return posicionales
+
+    return []
+
+
+def _naturaleza_fila(fila, columnas):
+    """Primera marca D/C encontrada en las columnas de naturaleza de la fila."""
+    for col in columnas:
+        valor = _to_str(fila[col]).upper()
+        if valor in DEBITO_VALUES:
+            return "D"
+        if valor in CREDITO_VALUES:
+            return "C"
+    return ""
+
+
+def _es_marca(valor):
+    return _to_str(valor).upper() in DEBITO_VALUES or _to_str(valor).upper() in CREDITO_VALUES
+
+
+def _es_rotulo_identificador(valor):
+    """True si la celda parece un rótulo de columna (Cédula, tercero, etc.)."""
+    texto = _to_str(valor)
+    if not texto or len(texto) > 30 or any(digito.isdigit() for digito in texto):
+        return False
+    normalizada = _normalize(texto)
+    if normalizada in CEDULA_PATTERNS or normalizada in TERCEROS_PATTERNS:
+        return True
+    return any(token in normalizada for token in CEDULA_CONTAINS + TERCEROS_CONTAINS)
+
+
+def _fila_es_encabezado(fila):
+    no_vacias = [celda for celda in fila if _to_str(celda)]
+    if len(no_vacias) < 2:
+        return False
+    return any(_es_rotulo_identificador(celda) for celda in fila)
+
+
+def _nombres_unicos(nombres):
+    usados = {}
+    unicos = []
+    for nombre in nombres:
+        base = nombre or "columna"
+        if base in usados:
+            usados[base] += 1
+            unicos.append(f"{base}.{usados[base]}")
+        else:
+            usados[base] = 1
+            unicos.append(base)
+    return unicos
+
+
+def _es_cabecera_cuenta(cabecera):
+    """True si el rótulo de una columna marcada puede ser una cuenta contable."""
+    normalizada = _normalize(cabecera)
+    if not normalizada or _es_columna_naturaleza(cabecera):
+        return False
+    if normalizada in CEDULA_PATTERNS or normalizada in TERCEROS_PATTERNS:
+        return False
+    if any(token in normalizada for token in CEDULA_CONTAINS + TERCEROS_CONTAINS):
+        return False
+    if normalizada in CCOSTOS_PATTERNS or any(token in normalizada for token in CCOSTOS_CONTAINS):
+        return False
+    if normalizada in OBS_PATTERNS or any(token in normalizada for token in OBS_CONTAINS):
+        return False
+    return True
+
+
+def _fila_marcas_columnas(matriz, posicion_encabezado):
+    """Fila con las marcas d/c de cada columna (encabezado combinado).
+
+    Debe estar justo encima o justo debajo de la fila del encabezado y traer
+    al menos dos marcas en columnas que parezcan cuentas."""
+    for posicion in (posicion_encabezado - 1, posicion_encabezado + 1):
+        if posicion < 0 or posicion >= len(matriz):
+            continue
+        fila = matriz[posicion]
+        if _fila_es_encabezado(fila):
+            continue
+        celdas = [(i, _to_str(valor).upper()) for i, valor in enumerate(fila) if _es_marca(valor)]
+        if len(celdas) < 2:
+            continue
+        encabezados = [_to_str(valor) for valor in matriz[posicion_encabezado]]
+        if all(i < len(encabezados) and _es_cabecera_cuenta(encabezados[i]) for i, _ in celdas):
+            return posicion, celdas
+    return None
+
+
+def _preparar_dataframe(df, max_filas=20):
+    """Detecta el encabezado real y el formato ancho (una columna por cuenta).
+
+    Formato ancho: la fila del encabezado trae las cuentas (ej. 6165950116,
+    6165950123, 23359505) y justo encima o debajo vienen las marcas d/c de
+    cada columna. Esas columnas se convierten a filas con
+    cedula + naturaleza + Cta contable + valor + centro de costos + observacion,
+    para que todo el resto del proceso funcione igual.
+
+    Devuelve (dataframe, cuenta_credito)."""
+    matriz = [list(df.columns)] + [list(fila) for fila in df.head(max_filas).values]
+
+    posicion_encabezado = None
+    for i, fila in enumerate(matriz):
+        if _fila_es_encabezado(fila):
+            posicion_encabezado = i
+            break
+    if posicion_encabezado is None:
+        return df, None
+
+    marcas = _fila_marcas_columnas(matriz, posicion_encabezado)
+
+    if marcas is None:
+        if posicion_encabezado == 0:
+            return df, None
+        nuevo = df.iloc[posicion_encabezado:].copy()
+        nuevo.columns = _nombres_unicos([_to_str(valor) for valor in matriz[posicion_encabezado]])
+        return nuevo, None
+
+    posicion_marcas, celdas = marcas
+    columnas = _nombres_unicos([_to_str(valor) for valor in matriz[posicion_encabezado]])
+    datos = df.iloc[posicion_encabezado:].copy()
+    indice_marcas = posicion_marcas - 1 - posicion_encabezado
+    if indice_marcas >= 0:
+        datos = datos.iloc[[i for i in range(len(datos)) if i != indice_marcas]]
+    datos.columns = columnas
+
+    col_cedula = _find_column(datos, CEDULA_PATTERNS, CEDULA_CONTAINS)
+    if col_cedula is None:
+        col_cedula = _find_column(datos, TERCEROS_PATTERNS, TERCEROS_CONTAINS)
+    if col_cedula is None:
+        return df, None
+
+    col_centro = _find_column(datos, CCOSTOS_PATTERNS, CCOSTOS_CONTAINS)
+    col_obs = _find_column(datos, OBS_PATTERNS, OBS_CONTAINS)
+
+    columnas_valor = [(i, marca) for i, marca in celdas if _es_cabecera_cuenta(columnas[i])]
+    if not columnas_valor:
+        return df, None
+
+    cuenta_credito = ""
+    for i, marca in columnas_valor:
+        if marca == "C" and not cuenta_credito:
+            cuenta_credito = _to_str(matriz[posicion_encabezado][i])
+
+    filas = []
+    for _, fila in datos.iterrows():
+        cedula = _to_str(fila[col_cedula])
+        if not cedula:
+            continue
+        centro = _to_str(fila[col_centro]) if col_centro else ""
+        observacion = _to_str(fila[col_obs]) if col_obs else ""
+        for i, marca in columnas_valor:
+            valor = fila[columnas[i]]
+            if not _to_str(valor):
+                continue
+            filas.append({
+                "cedula": cedula,
+                "Naturaleza": marca,
+                "Cta contable": _to_str(matriz[posicion_encabezado][i]),
+                "valor": valor,
+                "centro de costos": centro,
+                "observacion": observacion,
+            })
+
+    if not filas:
+        return df, None
+    return pd.DataFrame(filas), cuenta_credito
 
 
 def _to_str(value):
@@ -541,9 +784,13 @@ def generar_jsons(df, archivo_origen, template_padre=None, template_hijo=None,
 
     origen_base = os.path.splitext(os.path.basename(archivo_origen))[0]
 
-    tercero_col = _find_column(df, TERCEROS_PATTERNS, TERCEROS_CONTAINS)
+    df, cuenta_credito = _preparar_dataframe(df)
+
+    tercero_col = _find_column(df, CEDULA_PATTERNS, CEDULA_CONTAINS)
     if tercero_col is None:
-        return 0, 0, "No se encontró la columna de Tercero/ClientId en el Excel.", []
+        tercero_col = _find_column(df, TERCEROS_PATTERNS, TERCEROS_CONTAINS)
+    if tercero_col is None:
+        return 0, 0, "No se encontró la columna de Cédula/Tercero en el Excel.", []
 
     col_mapping = []
     for item in mapping:
@@ -553,7 +800,7 @@ def generar_jsons(df, archivo_origen, template_padre=None, template_hijo=None,
     fecha = _fecha_contable()
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    naturaleza_col = _find_column(df, NATURALEZA_PATTERNS, NATURALEZA_CONTAINS)
+    columnas_naturaleza = _columnas_naturaleza(df)
 
     carpeta_archivo = os.path.join(carpeta, f"{origen_base}_{timestamp}")
     os.makedirs(carpeta_archivo, exist_ok=True)
@@ -565,16 +812,23 @@ def generar_jsons(df, archivo_origen, template_padre=None, template_hijo=None,
 
     bloques = _bloques_por_tercero(df[tercero_col])
     if not bloques:
-        return 0, 0, "La columna de Tercero no tiene ningún valor.", []
+        return 0, 0, "La columna de Cédula no tiene ningún valor.", []
 
     for tercero, posiciones in bloques:
         grupo = df.iloc[posiciones]
         filas_debito = grupo
         filas_credito = None
-        if naturaleza_col is not None:
-            nat = grupo[naturaleza_col].astype(str).str.upper()
-            filas_debito = grupo[nat.isin({"D", "DB", "DEBITO", "DEBITOS"})]
-            filas_credito = grupo[nat.isin({"C", "CR", "CREDITO", "CREDITOS"})]
+        if columnas_naturaleza:
+            posiciones_debito = []
+            posiciones_credito = []
+            for posicion_local, (_, fila) in enumerate(grupo.iterrows()):
+                naturaleza = _naturaleza_fila(fila, columnas_naturaleza)
+                if naturaleza == "D":
+                    posiciones_debito.append(posicion_local)
+                elif naturaleza == "C":
+                    posiciones_credito.append(posicion_local)
+            filas_debito = grupo.iloc[posiciones_debito]
+            filas_credito = grupo.iloc[posiciones_credito]
 
         ingresos = []
         for _, row in filas_debito.iterrows():
@@ -644,6 +898,8 @@ def generar_jsons(df, archivo_origen, template_padre=None, template_hijo=None,
                 item["icc"] = icc_credito
             if obs_credito:
                 item["nconcepto"] = obs_credito
+            if cuenta_credito and re.fullmatch(r"[0-9]+", cuenta_credito):
+                item["icuenta"] = cuenta_credito
 
         base_nombre = f"{origen_base}_{_sanitize_filename(tercero)}_{timestamp}"
         nombre = f"{base_nombre}.json"
