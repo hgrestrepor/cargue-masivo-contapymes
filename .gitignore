@@ -7,3 +7,5 @@ uploads/
 venv/
 *.xlsx.bak
 .DS_Store
+endpoint_respuestas.log
+.~lock.*#

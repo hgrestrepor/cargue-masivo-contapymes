@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+from datetime import datetime
 from functools import wraps
 from requests.exceptions import ConnectionError, Timeout
 from flask import (
@@ -32,6 +33,36 @@ UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), "uploads")
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 PLANTILLA_EXCEL_MADRES = os.path.join(os.path.dirname(__file__), "plantilla_excel_madres.xlsx")
+PLANTILLA_EXCEL_TRANSPORTES = os.path.join(os.path.dirname(__file__), "plantilla_excel_transportes.xlsx")
+
+# LOG TEMPORAL de respuestas del endpoint (diagnóstico). Se puede borrar.
+LOG_RESPUESTA_ENDPOINT = os.path.join(os.path.dirname(__file__), "endpoint_respuestas.log")
+
+
+def log_respuesta_endpoint(tipo, registro, ruta, oprdata=None, opr_resp=None,
+                           enc=None, detalle=None, error=None):
+    """LOG TEMPORAL: agrega al archivo la respuesta del endpoint al enviar un JSON.
+
+    No modifica ningún flujo: solo escribe una línea y nunca lanza excepciones."""
+    try:
+        fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        cuerpo = {
+            "init": (oprdata or {}).get("datosprincipales", {}).get("init", ""),
+            "mtotaloperacion": (oprdata or {}).get("encabezado", {}).get("mtotaloperacion", ""),
+            "encabezado": enc or {},
+            "detalle": detalle or "",
+            "respuesta_cruda": opr_resp,
+        }
+        if error is not None:
+            cuerpo["error"] = str(error)
+        with open(LOG_RESPUESTA_ENDPOINT, "a", encoding="utf-8") as fh:
+            fh.write(
+                f"{fecha} | tipo={tipo} | registro={registro or 'sin dato'} | "
+                f"archivo={os.path.basename(ruta or '')} | "
+                f"{json.dumps(cuerpo, ensure_ascii=False, default=str)}\n"
+            )
+    except Exception:
+        pass
 
 
 def login_required(f):
@@ -119,6 +150,20 @@ def plantilla_madres():
 @login_required
 def dashboard_transportes():
     return render_template("dashboard_transportes.html")
+
+
+@app.route("/plantilla-transportes")
+@login_required
+def plantilla_transportes():
+    """Descarga la plantilla de Excel de transportes (plantilla_excel_transportes.xlsx)."""
+    if not os.path.exists(PLANTILLA_EXCEL_TRANSPORTES):
+        flash("No se encontró la plantilla de Excel de transportes.", "danger")
+        return responder(url_for("dashboard_transportes"), ok=False)
+    return send_file(
+        PLANTILLA_EXCEL_TRANSPORTES,
+        as_attachment=True,
+        download_name="plantilla_excel_transportes.xlsx",
+    )
 
 
 @app.route("/upload", methods=["POST"])
@@ -217,6 +262,8 @@ def upload():
                 opr_resp = enviar_operacion(cfg, keyagente, oprdata)
                 enc = extraer_encabezado(opr_resp)
                 ok = enc.get("resultado", "false") == "true"
+                log_respuesta_endpoint("Madres", tercero, ruta, oprdata, opr_resp,
+                                       enc, detalle_respuesta(opr_resp))
                 if ok:
                     exitosos += 1
                 else:
@@ -228,6 +275,7 @@ def upload():
                         "detalle": detalle_respuesta(opr_resp),
                     })
             except Exception as exc:
+                log_respuesta_endpoint("Madres", tercero, ruta, error=mensaje_error(exc))
                 fallidos.append({
                     "tercero": tercero,
                     "archivo": ruta,
@@ -310,6 +358,12 @@ def upload_transportes():
 
         log_upload(file.filename, True, num_registros, tipo="Transportes", usuario=session.get("username", ""))
 
+        import procesador_excel as _procesador_transporte
+        avisos_transporte = list(_procesador_transporte.ULTIMOS_AVISOS_TRANSPORTE)
+        if avisos_transporte:
+            cuerpo_avisos = " || ".join(str(a) for a in avisos_transporte)
+            flash(f"Avisos de generación de transportes: {cuerpo_avisos}", "warning")
+
         if not cfg.get("ep_email") or not cfg.get("ep_password"):
             flash(
                 "JSONs generados pero no se enviaron: configura el Email y la contraseña del endpoint.",
@@ -368,6 +422,8 @@ def upload_transportes():
                 opr_resp = enviar_operacion(cfg, keyagente, oprdata)
                 enc = extraer_encabezado(opr_resp)
                 ok = enc.get("resultado", "false") == "true"
+                log_respuesta_endpoint("Transportes", registro, ruta, oprdata, opr_resp,
+                                       enc, detalle_respuesta(opr_resp))
                 if ok:
                     exitosos += 1
                 else:
@@ -379,6 +435,7 @@ def upload_transportes():
                         "detalle": detalle_respuesta(opr_resp),
                     })
             except Exception as exc:
+                log_respuesta_endpoint("Transportes", registro, ruta, error=mensaje_error(exc))
                 fallidos.append({
                     "registro": registro,
                     "archivo": ruta,

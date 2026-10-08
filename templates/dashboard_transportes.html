@@ -26,6 +26,27 @@
         </div>
     </div>
 </div>
+
+<div class="row justify-content-center mt-4">
+    <div class="col-md-6">
+        <div class="card shadow">
+            <div class="card-header bg-light text-center">
+                <h5 class="mb-0">Plantilla de transportes</h5>
+            </div>
+            <div class="card-body p-4 text-center">
+                <a href="{{ url_for('plantilla_transportes') }}" class="btn btn-outline-success mb-3">
+                    Descargar plantilla Excel (plantilla_excel_transportes.xlsx)
+                </a>
+                <p class="text-muted small mb-0">
+                    Descarga el Excel con los encabezados exactos que espera este proceso:
+                    <strong>NOMBRE PROFESIONAL, DOCUMENTO PROFESIONAL, CUENTA PROFESIONAL,
+                    NOMBRE DEL ACUDIENTE, NUMERO DE DOCUMENTO DEL ACUDIENTE, NATURALEZA,
+                    cuenta CONTABLE, CONCEPTO GENERAL, CONCEPTO DEL DETALLE, CENTRO DE COSTO, VALOR</strong>.
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block scripts %}

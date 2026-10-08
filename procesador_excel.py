@@ -1,5 +1,6 @@
 import json
 import os
+import random
 import re
 from copy import deepcopy
 from datetime import datetime, timedelta
@@ -965,6 +966,20 @@ def _parse_template_transporte(template_transporte, template_hijo):
     return transporte, hijo
 
 
+def _texto_original(valor):
+    """Como _to_str pero conservando los espacios tal como vienen del Excel."""
+    if valor is None:
+        return ""
+    try:
+        if pd.isna(valor):
+            return ""
+    except (TypeError, ValueError):
+        pass
+    if isinstance(valor, float) and valor.is_integer():
+        return str(int(valor))
+    return str(valor)
+
+
 def _aplicar_mapeo_transporte(documento, ingreso, path, valor):
     """Asigna valor según la ruta JSON del mapeo de transportes.
 
@@ -978,7 +993,7 @@ def _aplicar_mapeo_transporte(documento, ingreso, path, valor):
     if partes[0] == "ingresosegresos":
         if len(partes) > 1:
             key = partes[1]
-            ingreso[key] = _to_float(valor) if _is_numeric_field(key) else _to_str(valor)
+            ingreso[key] = _to_float(valor) if _is_numeric_field(key) else _texto_original(valor)
         return
 
     def _resolver(cursor, restantes):
@@ -991,7 +1006,7 @@ def _aplicar_mapeo_transporte(documento, ingreso, path, valor):
             return
         if len(restantes) == 1:
             clave = restantes[0]
-            cursor[clave] = _to_float(valor) if _is_numeric_field(clave) else _to_str(valor)
+            cursor[clave] = _to_float(valor) if _is_numeric_field(clave) else _texto_original(valor)
             return
         siguiente = cursor.get(parte) if isinstance(cursor, dict) else None
         if not isinstance(siguiente, dict):
@@ -1001,6 +1016,29 @@ def _aplicar_mapeo_transporte(documento, ingreso, path, valor):
         _resolver(siguiente, resta)
 
     _resolver(documento, partes)
+
+
+def _fecha_a_mdy(valor):
+    """Convierte fechas dd/mm/yyyy a mm/dd/yyyy (formato que usa el endpoint)."""
+    if isinstance(valor, str) and len(valor) == 10 and valor[2] == "/" and valor[5] == "/":
+        dia, mes, anio = valor.split("/")
+        if dia.isdigit() and mes.isdigit() and anio.isdigit() and int(dia) > 12:
+            return f"{mes}/{dia}/{anio}"
+    return valor
+
+
+def _fechas_mdy(objeto):
+    """Recorre el JSON de transporte y deja todas las fechas en mm/dd/yyyy."""
+    if isinstance(objeto, dict):
+        return {clave: _fechas_mdy(valor) for clave, valor in objeto.items()}
+    if isinstance(objeto, list):
+        return [_fechas_mdy(valor) for valor in objeto]
+    return _fecha_a_mdy(objeto)
+
+
+# Avisos de la última generación de transportes (filas fusionadas/omitidas).
+# Se muta en sitio (clear/extend) para que app.py pueda leerlo siempre.
+ULTIMOS_AVISOS_TRANSPORTE = []
 
 
 def generar_jsons_transporte(df, archivo_origen, template_transporte=None,
@@ -1048,9 +1086,16 @@ def generar_jsons_transporte(df, archivo_origen, template_transporte=None,
         col = _find_named_column(df, item["excel"])
         col_mapping.append({"json": item["json"], "excel": item["excel"], "col": col})
 
+    col_documento = None
+    for item in mapping or []:
+        if str(item.get("json", "")).endswith("datosprincipales.init"):
+            col_documento = _find_named_column(df, item.get("excel", ""))
+            break
+
     fecha = _fecha_contable()
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     origen_base = os.path.splitext(os.path.basename(archivo_origen))[0]
+    soporte_base = random.randint(43000, 49990)
 
     carpeta_archivo = os.path.join(carpeta, f"{origen_base}_transporte_{timestamp}")
     os.makedirs(carpeta_archivo, exist_ok=True)
@@ -1058,10 +1103,22 @@ def generar_jsons_transporte(df, archivo_origen, template_transporte=None,
     total_json = 0
     total_registros = 0
     archivos_generados = []
+    avisos = []
+    filas_omitidas = 0
+    ULTIMOS_AVISOS_TRANSPORTE.clear()
 
     for acudiente, grupo in df.groupby(col_recorrido, dropna=False):
         registro = _to_str(acudiente)
+        cedulas = []
+        if col_documento is not None:
+            cedulas = sorted({_to_str(v) for v in grupo[col_documento].tolist() if _to_str(v)})
+        ced_txt = ", ".join(cedulas) if cedulas else "sin cédula"
         if not registro:
+            filas_omitidas += len(grupo)
+            avisos.append(
+                f"OMITIDO: {len(grupo)} fila(s) sin '{columna_recorrido or DEFAULT_COLUMNA_RECORRIDO_TRANSPORTE}' "
+                f"(cédulas: {ced_txt}) - no se creó ningún documento."
+            )
             continue
 
         documento = deepcopy(transporte)
@@ -1093,6 +1150,13 @@ def generar_jsons_transporte(df, archivo_origen, template_transporte=None,
         total = sum(float(i.get("mvalor") or 0.0) for i in ingresos)
         total_registros += len(ingresos)
 
+        if len(grupo) > 1:
+            avisos.append(
+                f"FUSIONADO: '{registro}' (cédulas: {ced_txt}) repetía '{col_recorrido}' "
+                f"en {len(grupo)} filas; se creó 1 documento con {len(ingresos)} línea(s) "
+                f"y total ${total:,.0f}."
+            )
+
         documento["ingresosegresos"] = ingresos
 
         encabezado = documento.get("encabezado", {})
@@ -1100,6 +1164,8 @@ def generar_jsons_transporte(df, archivo_origen, template_transporte=None,
         encabezado["fcreacion"] = fecha
         encabezado["fultima"] = fecha
         encabezado["mtotaloperacion"] = round(total, 2)
+        encabezado["iprocess"] = 2
+        encabezado["inumsop"] = soporte_base + total_json
         if usuario:
             encabezado["iusuario"] = usuario
             encabezado["iusuarioult"] = usuario
@@ -1111,12 +1177,31 @@ def generar_jsons_transporte(df, archivo_origen, template_transporte=None,
         formapago = documento.get("formapago", {})
         formapago["mtotalreg"] = "{:.8f}".format(total)
         formapago["mtotalpago"] = "{:.8f}".format(total)
+        cxp = formapago.get("fpagocxp", [])
+        formapago["qpagoscxp"] = len(cxp)
+        for item in cxp:
+            if _to_str(item.get("nconcepto", "")):
+                item["bconceptochanged"] = "T"
 
+        documento = _fechas_mdy(documento)
         nombre = f"{origen_base}_transporte_{_sanitize_filename(registro)}_{timestamp}.json"
         ruta = os.path.join(carpeta_archivo, nombre)
         with open(ruta, "w", encoding="utf-8") as f:
             json.dump(documento, f, ensure_ascii=False, indent=2)
         archivos_generados.append({"ruta": ruta, "tercero": _to_str(registro)})
         total_json += 1
+
+    if avisos:
+        ruta_avisos = os.path.join(carpeta_archivo, "avisos_generacion.log")
+        with open(ruta_avisos, "w", encoding="utf-8") as f:
+            f.write(f"Archivo: {archivo_origen}\n")
+            f.write(f"Filas leidas: {filas_omitidas + total_registros}\n")
+            f.write(f"Documentos generados: {total_json}\n")
+            f.write(f"Total lineas de detalle: {total_registros}\n")
+            f.write(f"Avisos: {len(avisos)}\n\n")
+            for indice, aviso in enumerate(avisos, 1):
+                f.write(f"{indice}. {aviso}\n")
+        ULTIMOS_AVISOS_TRANSPORTE.extend(avisos)
+        ULTIMOS_AVISOS_TRANSPORTE.append(f"Log completo: {ruta_avisos}")
 
     return total_json, total_registros, None, archivos_generados
