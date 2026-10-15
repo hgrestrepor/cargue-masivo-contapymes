@@ -1179,7 +1179,19 @@ def generar_jsons_transporte(df, archivo_origen, template_transporte=None,
         formapago["mtotalpago"] = "{:.8f}".format(total)
         cxp = formapago.get("fpagocxp", [])
         formapago["qpagoscxp"] = len(cxp)
+
+        # Centro de costo en fpagocxp (solo transportes):
+        # si la cuenta contable termina en 521 se envía vacío; si es una cuenta
+        # diferente, se llena con el centro de costos del Excel (ingresosegresos.icc).
+        centro_cxp = ""
+        for ingreso in ingresos:
+            cuenta = _to_str(ingreso.get("icuenta", ""))
+            if cuenta and not cuenta.endswith("521"):
+                centro_cxp = _to_str(ingreso.get("icc", ""))
+                break
+
         for item in cxp:
+            item["icc"] = centro_cxp
             if _to_str(item.get("nconcepto", "")):
                 item["bconceptochanged"] = "T"
 
